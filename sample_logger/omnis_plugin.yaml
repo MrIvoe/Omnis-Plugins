@@ -1,0 +1,12 @@
+id: sample_logger
+name: Sample Logger
+description: Logs track starts to the console
+version: 1.0.0
+author: Omnis Team
+entrypoint: plugin.dart
+hooks:
+  - onTrackStart
+  - onLibraryScan
+  - uiSlot
+permissions:
+  - network
