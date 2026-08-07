@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:omnis_plugin_api/base_track.dart';
 import 'package:omnis_plugin_api/hardware_eq_band.dart';
 import 'package:omnis_plugin_api/plugin_interface.dart';
+import 'package:omnis_plugin_api/service_interfaces.dart';
 
 /// A bundled equalizer plugin with two implementations behind one API:
 ///
@@ -26,6 +28,14 @@ import 'package:omnis_plugin_api/plugin_interface.dart';
 /// singleton) so they survive a restart — previously every band reset to
 /// flat on every launch.
 ///
+/// Persistence is per-device when a device is known: this plugin listens
+/// to `IDeviceConnectivityProvider` (`BluetoothPlaybackPlugin` today) and
+/// keys its saved bands by the connected device's name, so headphones and
+/// a car stereo can each remember their own EQ instead of sharing one
+/// profile. With no device connected (or no provider registered — the
+/// common case on a build without Bluetooth support), bands fall back to
+/// one shared default profile, matching this plugin's original behavior.
+///
 /// NOTE: the hardware path has not been exercised against a real Android
 /// device while building this — `PluginContext.ensureHardwareEqLoaded`
 /// fails closed (falls back to virtual mode) on any platform-channel
@@ -46,6 +56,23 @@ class EqualizerPlugin extends MusicPlugin {
   };
 
   bool _hardwareRestored = false;
+
+  /// The currently connected output device's name, from
+  /// [IDeviceConnectivityProvider] — `null` when nothing is connected or
+  /// no provider is registered. Bands are persisted per-device (see
+  /// [_virtualKeyFor]/[_hardwareKeyFor]) so plugging in headphones vs. a
+  /// car stereo can each remember their own EQ, falling back to one
+  /// shared default profile when nothing is connected.
+  String? _currentDevice;
+  StreamSubscription<String?>? _deviceSub;
+
+  String _virtualKeyFor(String? device) => device == null
+      ? _virtualBandsStorageKey
+      : '${_virtualBandsStorageKey}_device_$device';
+
+  String _hardwareKeyFor(String? device) => device == null
+      ? _hardwareBandsStorageKey
+      : '${_hardwareBandsStorageKey}_device_$device';
 
   /// Real hardware bands, if this platform provides them.
   List<HardwareEqBand> get hardwareBands =>
@@ -93,9 +120,11 @@ class EqualizerPlugin extends MusicPlugin {
     persistVirtualBands();
   }
 
-  /// Save the current virtual band values so they survive a restart.
+  /// Save the current virtual band values so they survive a restart —
+  /// under the currently-connected device's own key, if any (see
+  /// [_virtualKeyFor]).
   Future<void> persistVirtualBands() =>
-      _persistBandMap(_virtualBandsStorageKey, _virtualBands);
+      _persistBandMap(_virtualKeyFor(_currentDevice), _virtualBands);
 
   /// Live-update a real hardware band by its device-reported index. Cheap
   /// enough for drag frames — it's a single platform-channel call, not a
@@ -120,9 +149,11 @@ class EqualizerPlugin extends MusicPlugin {
     await persistHardwareBands();
   }
 
-  /// Save the current hardware band values so they survive a restart.
+  /// Save the current hardware band values so they survive a restart —
+  /// under the currently-connected device's own key, if any (see
+  /// [_hardwareKeyFor]).
   Future<void> persistHardwareBands() => _persistBandMap(
-        _hardwareBandsStorageKey,
+        _hardwareKeyFor(_currentDevice),
         {for (final band in hardwareBands) '${band.index}': band.gain},
       );
 
@@ -161,11 +192,13 @@ class EqualizerPlugin extends MusicPlugin {
 
   @override
   Future<void> initialize() async {
-    final savedVirtual = _readBandMap(_virtualBandsStorageKey);
-    for (final key in virtualBandKeys) {
-      final value = savedVirtual[key];
-      if (value != null) _virtualBands[key] = value.clamp(-12.0, 12.0);
-    }
+    final provider =
+        context?.services.get<IDeviceConnectivityProvider>();
+    _currentDevice = provider?.connectedDeviceName;
+    _deviceSub?.cancel();
+    _deviceSub = provider?.deviceChanges.listen(_onDeviceChanged);
+
+    _loadVirtualBandsFor(_currentDevice);
     await context?.ensureHardwareEqLoaded();
     await _restoreHardwareIfNeeded();
     if (!hasHardwareBands) {
@@ -173,11 +206,51 @@ class EqualizerPlugin extends MusicPlugin {
     }
   }
 
+  /// Loads (or resets to flat, if this device has no saved profile yet)
+  /// the virtual bands for [device] into [_virtualBands] — does not
+  /// itself apply the resulting gain; callers that need the audible
+  /// effect to update immediately (see [_onDeviceChanged]) do that
+  /// afterward.
+  void _loadVirtualBandsFor(String? device) {
+    final saved = _readBandMap(_virtualKeyFor(device));
+    for (final key in virtualBandKeys) {
+      _virtualBands[key] = (saved[key] ?? 0.0).clamp(-12.0, 12.0);
+    }
+  }
+
+  /// Re-loads whichever profile matches the now-connected device (or the
+  /// shared default profile, when [device] is `null`) and applies it
+  /// immediately — plugging in a different pair of headphones should
+  /// audibly switch EQ right away, the same "just connected, things
+  /// happen" spirit `BluetoothPlaybackPlugin`'s quick-play already has.
+  Future<void> _onDeviceChanged(String? device) async {
+    _currentDevice = device;
+    _loadVirtualBandsFor(device);
+    if (!hasHardwareBands) {
+      await context?.setGain(gainSource, combinedMultiplier);
+      return;
+    }
+    // A device change can also mean the hardware bands themselves
+    // changed identity (different device, different EQ hardware) — force
+    // a fresh restore against the new device's saved profile rather than
+    // trusting whatever _hardwareRestored's prior state was.
+    _hardwareRestored = false;
+    await _restoreHardwareIfNeeded();
+  }
+
   Future<void> _restoreHardwareIfNeeded() async {
     if (_hardwareRestored || !hasHardwareBands) return;
     _hardwareRestored = true;
-    final saved = _readBandMap(_hardwareBandsStorageKey);
-    if (saved.isEmpty) return;
+    final saved = _readBandMap(_hardwareKeyFor(_currentDevice));
+    if (saved.isEmpty) {
+      // No saved profile for this device — start flat rather than
+      // carrying over whatever the previous device's bands happened to
+      // be left at.
+      for (final band in hardwareBands) {
+        await band.setGain(0.0);
+      }
+      return;
+    }
     for (final band in hardwareBands) {
       final value = saved['${band.index}'];
       if (value != null) await band.setGain(value);
@@ -212,6 +285,8 @@ class EqualizerPlugin extends MusicPlugin {
 
   @override
   Future<void> dispose() async {
+    await _deviceSub?.cancel();
+    _deviceSub = null;
     await context?.clearGain(gainSource);
   }
 

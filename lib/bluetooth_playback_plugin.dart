@@ -33,12 +33,22 @@ import 'package:omnis_plugin_api/service_interfaces.dart';
 /// **Verification status**: implemented against `audio_session`'s
 /// documented API; not exercised against a real Bluetooth device
 /// connecting/disconnecting in this environment.
-class BluetoothPlaybackPlugin extends MusicPlugin {
+class BluetoothPlaybackPlugin extends MusicPlugin
+    implements IDeviceConnectivityProvider {
   static const _enabledKey = 'enabled';
 
   StreamSubscription<AudioDevicesChangedEvent>? _devicesSub;
   String? connectedDeviceName;
   String? lastError;
+
+  /// Broadcasts [connectedDeviceName] every time it changes (a device
+  /// connecting, a different device connecting, or disconnecting to
+  /// `null`) — unlike the field itself, which callers had to poll.
+  /// `EqualizerPlugin` listens to this for per-device EQ presets; any
+  /// other plugin wanting to react to device changes can too, without
+  /// this plugin needing to know who's listening.
+  final _deviceController = StreamController<String?>.broadcast();
+  Stream<String?> get deviceChanges => _deviceController.stream;
 
   bool get enabled => storage.getBool(_enabledKey) ?? false;
 
@@ -74,12 +84,14 @@ class BluetoothPlaybackPlugin extends MusicPlugin {
         for (final device in event.devicesAdded) {
           if (_isBluetoothOutput(device)) {
             connectedDeviceName = device.name;
+            _deviceController.add(connectedDeviceName);
             return;
           }
         }
         for (final device in event.devicesRemoved) {
           if (_isBluetoothOutput(device) && device.name == connectedDeviceName) {
             connectedDeviceName = null;
+            _deviceController.add(null);
           }
         }
       });
@@ -91,7 +103,10 @@ class BluetoothPlaybackPlugin extends MusicPlugin {
   Future<void> _stop() async {
     await _devicesSub?.cancel();
     _devicesSub = null;
-    connectedDeviceName = null;
+    if (connectedDeviceName != null) {
+      connectedDeviceName = null;
+      _deviceController.add(null);
+    }
   }
 
   /// Every mood/preset name any registered [IQueueBuilder] understands —
@@ -178,6 +193,7 @@ class BluetoothPlaybackPlugin extends MusicPlugin {
 
   @override
   Future<void> initialize() async {
+    context?.services.register(IDeviceConnectivityProvider, this);
     if (enabled) await _start();
   }
 
@@ -188,7 +204,15 @@ class BluetoothPlaybackPlugin extends MusicPlugin {
   Future<void> onLibraryScan(String file) async {}
 
   @override
-  Future<void> disable() async => _stop();
+  Future<void> enable() async {
+    context?.services.register(IDeviceConnectivityProvider, this);
+  }
+
+  @override
+  Future<void> disable() async {
+    context?.services.unregister(IDeviceConnectivityProvider, this);
+    await _stop();
+  }
 
   @override
   dynamic uiSlot(String locationID) => switch (locationID) {
@@ -198,7 +222,10 @@ class BluetoothPlaybackPlugin extends MusicPlugin {
       };
 
   @override
-  Future<void> dispose() async => _stop();
+  Future<void> dispose() async {
+    await _stop();
+    await _deviceController.close();
+  }
 }
 
 /// Small badge on Now Playing when a Bluetooth device is connected —
