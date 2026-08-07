@@ -44,25 +44,50 @@ import 'package:omnis_plugins/youtube_playback_plugin.dart';
 /// come before `QueuePresetPlugin` so its curated mood-tag match gets
 /// tried before that plugin's always-non-empty objective fallback (see
 /// `IQueueBuilder`'s doc in `service_interfaces.dart`).
-List<MusicPlugin> createBundledPlugins() => <MusicPlugin>[
-      SleepTimerPlugin(),
-      ShuffleRepeatPlugin(),
-      ReplayGainPlugin(),
-      LyricsPlugin(),
-      EqualizerPlugin(),
-      FavoritesPlugin(),
-      VisualizerPlugin(),
-      SmartPlaylistPlugin(),
-      QueuePresetPlugin(),
-      ScrobblePlugin(),
-      MetadataEnrichmentPlugin(),
-      AudioAnalysisPlugin(),
-      TagEditorPlugin(),
-      SpotifyImportPlugin(),
-      SpotifyPlaybackPlugin(),
-      YoutubeMusicImportPlugin(),
-      YoutubePlaybackPlugin(),
-      BluetoothPlaybackPlugin(),
-      RingtonePlugin(),
-      DrivingModePlugin(),
-    ];
+///
+/// Each entry is a factory, constructed one at a time inside a `try`/
+/// `catch` below rather than as one list-literal expression — a single
+/// constructor throwing must not take the other 19 plugins down with
+/// it. (Omnis's own `PluginManager.registerAll` adds a second, coarser
+/// layer of the same guarantee around the call to this function as a
+/// whole, for the rare case a future version of this list changes shape
+/// and reintroduces an unguarded throw — but skipping only the broken
+/// entry, not the whole registry, is what actually happens here today.)
+List<MusicPlugin> createBundledPlugins() {
+  final factories = <MusicPlugin Function()>[
+    () => SleepTimerPlugin(),
+    () => ShuffleRepeatPlugin(),
+    () => ReplayGainPlugin(),
+    () => LyricsPlugin(),
+    () => EqualizerPlugin(),
+    () => FavoritesPlugin(),
+    () => VisualizerPlugin(),
+    () => SmartPlaylistPlugin(),
+    () => QueuePresetPlugin(),
+    () => ScrobblePlugin(),
+    () => MetadataEnrichmentPlugin(),
+    () => AudioAnalysisPlugin(),
+    () => TagEditorPlugin(),
+    () => SpotifyImportPlugin(),
+    () => SpotifyPlaybackPlugin(),
+    () => YoutubeMusicImportPlugin(),
+    () => YoutubePlaybackPlugin(),
+    () => BluetoothPlaybackPlugin(),
+    () => RingtonePlugin(),
+    () => DrivingModePlugin(),
+  ];
+  final plugins = <MusicPlugin>[];
+  for (final factory in factories) {
+    try {
+      plugins.add(factory());
+    } catch (_) {
+      // Skip only this entry — the rest of the registry still loads.
+      // Omnis-side registration/initialization already logs failures to
+      // the Plugin Health dashboard; a constructor that throws before a
+      // plugin even has an id can't be attributed there, so this stays a
+      // silent skip rather than duplicating that logging here (this
+      // package has no dependency on Omnis's health-record types).
+    }
+  }
+  return plugins;
+}
