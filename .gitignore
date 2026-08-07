@@ -3,3 +3,8 @@ build/
 pubspec.lock
 .flutter-plugins
 .flutter-plugins-dependencies
+
+# Local-dev-only dependency override (see the comment inside the file) —
+# committing this would shadow the real git dependency for CI and every
+# other clone, not just this machine.
+pubspec_overrides.yaml
