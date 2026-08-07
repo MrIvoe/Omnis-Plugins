@@ -1,0 +1,37 @@
+name: omnis_plugins
+description: >
+  Bundled plugin implementations for Omnis — compiled directly into the
+  app, with full platform access, as opposed to sample_logger/ (a
+  dart_eval-sandboxed, runtime-downloadable plugin, and not a pub package
+  itself). Depends only on omnis_plugin_api, never on the Omnis app
+  itself, so there's no circular dependency between this repo and Omnis.
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: ">=3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  omnis_plugin_api:
+    git:
+      url: https://github.com/MrIvoe/Omnis.git
+      path: packages/omnis_plugin_api
+  http: ^1.2.0
+  crypto: ^3.0.7
+  flutter_web_auth_2: ^5.0.3
+  youtube_player_iframe: ^5.2.2
+  id3_codec: ^1.0.3
+  permission_handler: ^11.3.1
+  geolocator: 12.0.0
+  audio_session: ^0.1.25
+  set_ringtone: ^1.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
