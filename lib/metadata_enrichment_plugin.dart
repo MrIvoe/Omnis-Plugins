@@ -140,6 +140,9 @@ class MetadataEnrichmentPlugin extends MusicPlugin implements IMetadataProvider 
       canonicalArtist: mb?.artist,
       canonicalAlbum: mb?.album,
       year: mb?.year,
+      albumArtist: mb?.albumArtist,
+      releaseType: mb?.releaseType,
+      releaseDate: mb?.releaseDate,
       genres: genres.toList(),
       mood: mood,
       sourcesUsed: sources,
@@ -163,6 +166,11 @@ class MetadataEnrichmentPlugin extends MusicPlugin implements IMetadataProvider 
       'query': query,
       'fmt': 'json',
       'limit': '1',
+      // release-groups nests release-group.primary-type (album / single /
+      // EP / compilation) under each release, and the release's own
+      // artist-credit (distinct from the recording's) — neither is
+      // present in the default response.
+      'inc': 'release-groups',
     });
     try {
       final resp = await _client
@@ -182,6 +190,9 @@ class MetadataEnrichmentPlugin extends MusicPlugin implements IMetadataProvider 
       final releases = rec['releases'] as List<dynamic>?;
       String? album;
       int? year;
+      String? albumArtist;
+      ReleaseType? releaseType;
+      DateTime? releaseDate;
       if (releases != null && releases.isNotEmpty) {
         final release = releases.first as Map<String, dynamic>;
         album = release['title'] as String?;
@@ -189,12 +200,31 @@ class MetadataEnrichmentPlugin extends MusicPlugin implements IMetadataProvider 
         if (date != null && date.length >= 4) {
           year = int.tryParse(date.substring(0, 4));
         }
+        // Only a full YYYY-MM-DD date parses as a DateTime — MusicBrainz
+        // also returns bare-year or year-month partial dates, which
+        // DateTime.tryParse correctly rejects rather than guessing a day.
+        if (date != null) releaseDate = DateTime.tryParse(date);
+
+        final releaseArtistCredit = release['artist-credit'] as List<dynamic>?;
+        albumArtist =
+            (releaseArtistCredit != null && releaseArtistCredit.isNotEmpty)
+                ? (releaseArtistCredit.first as Map<String, dynamic>)['name']
+                    as String?
+                : artistName;
+
+        final releaseGroup = release['release-group'] as Map<String, dynamic>?;
+        releaseType = _releaseTypeFromMusicBrainz(
+          releaseGroup?['primary-type'] as String?,
+        );
       }
       return _MusicBrainzMatch(
         title: rec['title'] as String?,
         artist: artistName,
         album: album,
         year: year,
+        albumArtist: albumArtist,
+        releaseType: releaseType,
+        releaseDate: releaseDate,
       );
     } catch (e) {
       return null;
@@ -318,8 +348,38 @@ class _MusicBrainzMatch {
   final String? artist;
   final String? album;
   final int? year;
+  final String? albumArtist;
+  final ReleaseType? releaseType;
+  final DateTime? releaseDate;
 
-  const _MusicBrainzMatch({this.title, this.artist, this.album, this.year});
+  const _MusicBrainzMatch({
+    this.title,
+    this.artist,
+    this.album,
+    this.year,
+    this.albumArtist,
+    this.releaseType,
+    this.releaseDate,
+  });
+}
+
+/// Maps MusicBrainz's `release-group.primary-type` string to
+/// [ReleaseType]. MusicBrainz's vocabulary is wider than ours (it also
+/// has "Broadcast", "Other", etc.) — anything not in our four values
+/// comes back `null` rather than a wrong guess.
+ReleaseType? _releaseTypeFromMusicBrainz(String? primaryType) {
+  switch (primaryType) {
+    case 'Album':
+      return ReleaseType.album;
+    case 'Single':
+      return ReleaseType.single;
+    case 'EP':
+      return ReleaseType.ep;
+    case 'Compilation':
+      return ReleaseType.compilation;
+    default:
+      return null;
+  }
 }
 
 /// This plugin's own settings — reached by tapping it in the Plugins list,
