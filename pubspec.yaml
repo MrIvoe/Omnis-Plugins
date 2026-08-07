@@ -15,10 +15,17 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # Pinned to a tag, not a floating branch: a push to Omnis must not
+  # silently change what this package builds against. Bump the ref
+  # deliberately (its own reviewed commit) when picking up new contract
+  # changes on purpose. Must match Omnis's own pubspec.yaml declaration
+  # of this package (same url+path+ref) — that's what lets pub treat
+  # both edges of the graph as one consistent source.
   omnis_plugin_api:
     git:
       url: https://github.com/MrIvoe/Omnis.git
       path: packages/omnis_plugin_api
+      ref: plugin-api-v0.1.0
   http: ^1.2.0
   crypto: ^3.0.7
   flutter_web_auth_2: ^5.0.3
