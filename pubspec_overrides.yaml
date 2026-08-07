@@ -1,9 +1,0 @@
-# Local-dev override: resolve omnis_plugin_api from the sibling Omnis
-# checkout instead of fetching it from GitHub, so editing a contract in
-# packages/omnis_plugin_api/ is picked up immediately without a
-# commit+push round trip. A clean clone of this repo (no override file
-# present) resolves the git dependency in pubspec.yaml instead — that's
-# what CI and anyone else cloning this repo actually gets.
-dependency_overrides:
-  omnis_plugin_api:
-    path: ../Omnis/packages/omnis_plugin_api
