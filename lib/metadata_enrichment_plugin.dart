@@ -311,6 +311,9 @@ class MetadataEnrichmentPlugin extends MusicPlugin implements IMetadataProvider 
   String get author => 'Omnis Team';
 
   @override
+  bool get usesNetwork => true;
+
+  @override
   Future<void> initialize() async {
     context?.services.register(IMetadataProvider, this);
   }

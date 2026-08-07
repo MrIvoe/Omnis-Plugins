@@ -136,6 +136,9 @@ class AudioAnalysisPlugin extends MusicPlugin implements IAudioAnalysisProvider 
   String get author => 'Omnis Team';
 
   @override
+  bool get usesNetwork => true;
+
+  @override
   Future<void> initialize() async {
     context?.services.register(IAudioAnalysisProvider, this);
   }

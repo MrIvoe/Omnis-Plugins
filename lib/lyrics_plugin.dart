@@ -315,6 +315,9 @@ class LyricsPlugin extends MusicPlugin implements ILyricsProvider {
   String get author => 'Omnis Team';
 
   @override
+  bool get usesNetwork => true;
+
+  @override
   Future<void> initialize() async {
     _lyrics
       ..clear()
