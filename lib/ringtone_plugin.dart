@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, visibleForTesting;
 import 'package:omnis_plugin_api/base_track.dart';
 import 'package:omnis_plugin_api/plugin_interface.dart';
 import 'package:set_ringtone/set_ringtone.dart';
@@ -33,7 +33,17 @@ import 'package:set_ringtone/set_ringtone.dart';
 class RingtonePlugin extends MusicPlugin {
   String? lastError;
 
-  bool get isSupportedOnThisPlatform => !kIsWeb && Platform.isAndroid;
+  /// Overrides [isSupportedOnThisPlatform]'s real platform check — the
+  /// only way to reach the "no local file" and "the native call itself
+  /// failed" branches of [_set] from a test, since Platform.isAndroid is
+  /// always false in CI/dev regardless of host OS.
+  @visibleForTesting
+  final bool? platformSupportOverride;
+
+  RingtonePlugin({this.platformSupportOverride});
+
+  bool get isSupportedOnThisPlatform =>
+      platformSupportOverride ?? (!kIsWeb && Platform.isAndroid);
 
   Future<bool> setAsRingtone(BaseTrack track) =>
       _set(track, Ringtone.setRingtoneFromFile);
