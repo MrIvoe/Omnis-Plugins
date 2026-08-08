@@ -85,24 +85,36 @@ class DrivingModePlugin extends MusicPlugin {
   bool get isDrivingDetected => _inDrivingMode;
 
   Future<void> _start() async {
-    final hasPermission = await _ensurePermission();
-    if (!hasPermission) {
-      lastError = 'Location permission denied — driving detection can\'t run.';
-      return;
+    // Geolocator's platform calls (checkPermission/getPositionStream) can
+    // themselves throw — a platform-channel error, location services
+    // disabled at the OS level, or any other geolocator-internal failure
+    // — same as bluetooth_playback_plugin.dart's equivalent AudioSession
+    // call. Without this try/catch, that would propagate all the way up
+    // through the settings page's `onChanged` callback as an unhandled
+    // async error instead of degrading to a visible lastError message.
+    try {
+      final hasPermission = await _ensurePermission();
+      if (!hasPermission) {
+        lastError =
+            'Location permission denied — driving detection can\'t run.';
+        return;
+      }
+      lastError = null;
+      await _positionSub?.cancel();
+      _positionSub = Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.medium,
+          // Only re-check every ~50m — GPS speed readings are noisy at
+          // small intervals and this is a "driving vs. not," not a
+          // turn-by-turn feature.
+          distanceFilter: 50,
+        ),
+      ).listen(_onPosition, onError: (Object e) {
+        lastError = 'Location stream error: $e';
+      });
+    } catch (e) {
+      lastError = 'Could not start driving detection: $e';
     }
-    lastError = null;
-    await _positionSub?.cancel();
-    _positionSub = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.medium,
-        // Only re-check every ~50m — GPS speed readings are noisy at
-        // small intervals and this is a "driving vs. not," not a
-        // turn-by-turn feature.
-        distanceFilter: 50,
-      ),
-    ).listen(_onPosition, onError: (Object e) {
-      lastError = 'Location stream error: $e';
-    });
   }
 
   Future<void> _stop() async {
