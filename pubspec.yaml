@@ -35,6 +35,18 @@ dependencies:
   geolocator: 12.0.0
   audio_session: ^0.1.25
   set_ringtone: ^1.0.0
+  # --- Real spectrum visualizer (VisualizerPlugin). Android/iOS only —
+  #     see that plugin's own doc comment for the RECORD_AUDIO permission
+  #     requirement and the audioSessionId/session-targeting tradeoff.
+  #     Pinned below ^1.1.0: that release bumped its SDK constraint to
+  #     ^3.12.0, newer than this project's Flutter 3.27.4/Dart 3.6.2. ---
+  audify: ^1.0.0
+  # Only used by VisualizerPlugin to read the real Android SDK level —
+  # audify needs API 24+ natively, but the app itself still targets
+  # minSdkVersion 21 (see android/app/src/main/AndroidManifest.xml's
+  # tools:overrideLibrary comment), so the plugin has to check this
+  # itself and degrade gracefully below API 24 rather than assume.
+  device_info_plus: ^10.0.0
 
 dev_dependencies:
   flutter_test:
