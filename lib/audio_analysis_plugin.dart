@@ -33,13 +33,14 @@ import 'package:omnis_plugin_api/service_interfaces.dart';
 /// list) at it; it never assumes or ships a default endpoint, and does
 /// nothing at all while the setting is blank.
 ///
-/// **Verification status**: the client here is unit-tested against
-/// mocked HTTP responses. The companion service is real, unmodified
-/// Essentia code following its own official tutorial, but this
-/// environment has no running Docker daemon and no audio hardware, so the
-/// service itself has not been built or run end-to-end — treat it as a
-/// well-researched starting point, not a verified artifact, until you've
-/// run it once yourself.
+/// **Verification status**: this client is unit-tested against mocked
+/// HTTP responses (`test/audio_analysis_plugin_test.dart`). The companion
+/// service has separately been built, run via Docker, and verified
+/// end-to-end against a real request/response round trip — see its own
+/// README for what that confirmed. Still worth a sanity check on your own
+/// library before trusting it broadly (a single synthetic test tone
+/// doesn't cover real music's variety), but this is a working pipeline,
+/// not just a well-researched one.
 class AudioAnalysisPlugin extends MusicPlugin implements IAudioAnalysisProvider {
   static const _serviceUrlStorageKey = 'essentia_service_url';
 
