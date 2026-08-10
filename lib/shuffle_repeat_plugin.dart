@@ -198,6 +198,31 @@ class ShuffleRepeatPlugin extends MusicPlugin {
     await storage.setString(_repeatKey, _encodeRepeat(next));
   }
 
+  /// Cycles a single combined play-mode control: off -> repeat all ->
+  /// repeat one -> shuffle -> off. Replaces offering shuffle and repeat as
+  /// two independent toggles — "shuffle + repeat one" was never a
+  /// meaningful combination anyway, so entering shuffle always clears
+  /// repeat (and vice versa) rather than letting the two accumulate into
+  /// a confusing joint state.
+  Future<void> cyclePlayMode() async {
+    if (_shuffleOn) {
+      await toggleShuffle();
+      return;
+    }
+    switch (repeatMode) {
+      case RepeatMode.off:
+        await context?.setRepeatMode(RepeatMode.all);
+        await storage.setString(_repeatKey, _encodeRepeat(RepeatMode.all));
+      case RepeatMode.all:
+        await context?.setRepeatMode(RepeatMode.one);
+        await storage.setString(_repeatKey, _encodeRepeat(RepeatMode.one));
+      case RepeatMode.one:
+        await context?.setRepeatMode(RepeatMode.off);
+        await storage.setString(_repeatKey, _encodeRepeat(RepeatMode.off));
+        await toggleShuffle();
+    }
+  }
+
   String _encodeRepeat(RepeatMode mode) => switch (mode) {
         RepeatMode.all => 'all',
         RepeatMode.one => 'one',
