@@ -1,4 +1,5 @@
 import 'package:omnis_plugin_api/plugin_interface.dart';
+import 'package:omnis_plugins/artist_image_plugin.dart';
 import 'package:omnis_plugins/audio_analysis_plugin.dart';
 import 'package:omnis_plugins/bluetooth_playback_plugin.dart';
 import 'package:omnis_plugins/driving_mode_plugin.dart';
@@ -66,6 +67,7 @@ List<MusicPlugin> createBundledPlugins() {
     () => QueuePresetPlugin(),
     () => ScrobblePlugin(),
     () => MetadataEnrichmentPlugin(),
+    () => ArtistImagePlugin(),
     () => AudioAnalysisPlugin(),
     () => TagEditorPlugin(),
     () => SpotifyImportPlugin(),
