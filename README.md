@@ -1,8 +1,3 @@
-diff --git a/README.md b/README.md
-index d077311..6d075c9 100644
---- a/README.md
-+++ b/README.md
-@@ -1,5 +1,9 @@
  # Omnis-Plugins
  
 +[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
