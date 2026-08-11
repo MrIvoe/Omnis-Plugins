@@ -44,6 +44,10 @@ class YoutubeAuth {
   YoutubeAuth({required this.storage, http.Client? client})
       : client = client ?? http.Client();
 
+  /// See `SpotifyAuth._cachedAccessToken`'s doc comment — same reasoning,
+  /// same pattern.
+  String? _cachedAccessToken;
+
   String get clientId => storage.getString(_clientIdKey) ?? '';
   Future<void> setClientId(String id) => storage.setString(_clientIdKey, id.trim());
 
@@ -51,12 +55,19 @@ class YoutubeAuth {
   Future<void> setClientSecret(String secret) =>
       storage.setString(_clientSecretKey, secret.trim());
 
-  bool get isConnected => (storage.getString(_accessTokenKey) ?? '').isNotEmpty;
+  bool get isConnected => (_cachedAccessToken ?? '').isNotEmpty;
+
+  /// See `SpotifyAuth.warmUp`'s doc comment — same reasoning, same
+  /// pattern.
+  Future<void> warmUp() async {
+    _cachedAccessToken = await storage.getSecureString(_accessTokenKey);
+  }
 
   Future<void> disconnect() async {
-    await storage.remove(_accessTokenKey);
-    await storage.remove(_refreshTokenKey);
+    await storage.removeSecure(_accessTokenKey);
+    await storage.removeSecure(_refreshTokenKey);
     await storage.remove(_expiresAtKey);
+    _cachedAccessToken = null;
   }
 
   String _redirectUri() => Platform.isAndroid || Platform.isIOS
@@ -138,9 +149,10 @@ class YoutubeAuth {
     final expiresIn = json['expires_in'];
     final expiresInSeconds = expiresIn is num ? expiresIn.toInt() : 3600;
 
-    await storage.setString(_accessTokenKey, accessToken);
+    await storage.setSecureString(_accessTokenKey, accessToken);
+    _cachedAccessToken = accessToken;
     if (refreshToken != null) {
-      await storage.setString(_refreshTokenKey, refreshToken);
+      await storage.setSecureString(_refreshTokenKey, refreshToken);
     }
     await storage.setInt(
       _expiresAtKey,
@@ -152,7 +164,7 @@ class YoutubeAuth {
   /// A currently-valid access token, refreshing first if needed. `null`
   /// when not connected or a refresh fails.
   Future<String?> validAccessToken() async {
-    final token = storage.getString(_accessTokenKey);
+    final token = await storage.getSecureString(_accessTokenKey);
     if (token == null || token.isEmpty) return null;
 
     final expiresAtMs = storage.getInt(_expiresAtKey) ?? 0;
@@ -161,7 +173,7 @@ class YoutubeAuth {
       return token;
     }
 
-    final refreshToken = storage.getString(_refreshTokenKey);
+    final refreshToken = await storage.getSecureString(_refreshTokenKey);
     if (refreshToken == null || refreshToken.isEmpty) return null;
 
     try {
@@ -177,7 +189,7 @@ class YoutubeAuth {
       ).timeout(const Duration(seconds: 15));
       if (resp.statusCode != 200) return null;
       final ok = await _storeTokenResponse(jsonDecode(resp.body));
-      return ok ? storage.getString(_accessTokenKey) : null;
+      return ok ? _cachedAccessToken : null;
     } catch (_) {
       return null;
     }

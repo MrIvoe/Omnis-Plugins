@@ -217,7 +217,7 @@ class SpotifyPlaybackPlugin extends MusicPlugin {
   bool get usesNetwork => true;
 
   @override
-  Future<void> initialize() async {}
+  Future<void> initialize() => _auth.warmUp();
 
   @override
   Future<void> onTrackStart(BaseTrack track) async {}

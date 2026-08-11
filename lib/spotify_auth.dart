@@ -61,16 +61,34 @@ class SpotifyAuth {
   SpotifyAuth({required this.storage, http.Client? client})
       : client = client ?? http.Client();
 
+  /// In-memory cache of the access token, backing the synchronous
+  /// [isConnected] — secure storage has no synchronous read API the way
+  /// `PluginStorage`'s plain getters do (see `PluginStorage.getSecureString`'s
+  /// doc comment). `null` means "not warmed yet," matching the same
+  /// "unknown until warm" contract the plain getters already have before
+  /// `PluginStorage.initialize()` has run.
+  String? _cachedAccessToken;
+
   String get clientId => storage.getString(_clientIdKey) ?? '';
 
   Future<void> setClientId(String id) => storage.setString(_clientIdKey, id.trim());
 
-  bool get isConnected => (storage.getString(_accessTokenKey) ?? '').isNotEmpty;
+  bool get isConnected => (_cachedAccessToken ?? '').isNotEmpty;
+
+  /// Populates [_cachedAccessToken] from secure storage. Call once during
+  /// the owning plugin's `initialize()` hook, after `PluginManager` has
+  /// already warmed `storage` itself — every other read in this class is
+  /// already async and just reads secure storage directly, so only this
+  /// synchronous-cache warm-up is needed.
+  Future<void> warmUp() async {
+    _cachedAccessToken = await storage.getSecureString(_accessTokenKey);
+  }
 
   Future<void> disconnect() async {
-    await storage.remove(_accessTokenKey);
-    await storage.remove(_refreshTokenKey);
+    await storage.removeSecure(_accessTokenKey);
+    await storage.removeSecure(_refreshTokenKey);
     await storage.remove(_expiresAtKey);
+    _cachedAccessToken = null;
   }
 
   String _redirectUri() =>
@@ -157,9 +175,10 @@ class SpotifyAuth {
     final expiresIn = json['expires_in'];
     final expiresInSeconds = expiresIn is num ? expiresIn.toInt() : 3600;
 
-    await storage.setString(_accessTokenKey, accessToken);
+    await storage.setSecureString(_accessTokenKey, accessToken);
+    _cachedAccessToken = accessToken;
     if (refreshToken != null) {
-      await storage.setString(_refreshTokenKey, refreshToken);
+      await storage.setSecureString(_refreshTokenKey, refreshToken);
     }
     await storage.setInt(
       _expiresAtKey,
@@ -175,7 +194,7 @@ class SpotifyAuth {
   /// connected or a refresh fails — callers should treat that as "not
   /// authenticated" and prompt to reconnect.
   Future<String?> validAccessToken() async {
-    final token = storage.getString(_accessTokenKey);
+    final token = await storage.getSecureString(_accessTokenKey);
     if (token == null || token.isEmpty) return null;
 
     final expiresAtMs = storage.getInt(_expiresAtKey) ?? 0;
@@ -184,7 +203,7 @@ class SpotifyAuth {
       return token;
     }
 
-    final refreshToken = storage.getString(_refreshTokenKey);
+    final refreshToken = await storage.getSecureString(_refreshTokenKey);
     if (refreshToken == null || refreshToken.isEmpty) return null;
 
     try {
@@ -199,7 +218,7 @@ class SpotifyAuth {
       ).timeout(const Duration(seconds: 15));
       if (resp.statusCode != 200) return null;
       final ok = await _storeTokenResponse(jsonDecode(resp.body));
-      return ok ? storage.getString(_accessTokenKey) : null;
+      return ok ? _cachedAccessToken : null;
     } catch (_) {
       return null;
     }
