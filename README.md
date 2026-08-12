@@ -10,6 +10,17 @@ on `omnis_plugin_api` (a dependency-free contracts package living inside
 the Omnis repo at `packages/omnis_plugin_api`), never on Omnis internals,
 so there's no circular dependency between this repo and the app.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow specific to
+this repo, and the main repo's
+[CONTRIBUTING.md](https://github.com/MrIvoe/Omnis/blob/main/CONTRIBUTING.md) /
+[PLUGIN_GUIDE.md](https://github.com/MrIvoe/Omnis/blob/main/docs/PLUGIN_GUIDE.md)
+for the full plugin-development rules. Building a downloadable
+(non-bundled) plugin instead? See
+[docs/COMMUNITY_PLUGINS.md](https://github.com/MrIvoe/Omnis/blob/main/docs/COMMUNITY_PLUGINS.md)
+in the main repo to get it listed once it works.
+
 ## Versioning
 
 Pinned to `omnis_plugin_api` by git tag (`pubspec.yaml`'s `ref:`), not a

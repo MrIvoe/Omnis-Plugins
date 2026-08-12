@@ -1,0 +1,69 @@
+name: Bug report
+description: A bundled plugin isn't working the way it should.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This repo is for the plugins that ship *bundled* with Omnis. If
+        the problem is in Omnis itself (Core, UI, a downloaded/
+        third-party plugin), file it in the
+        [Omnis repo](https://github.com/MrIvoe/Omnis/issues) instead.
+
+  - type: dropdown
+    id: plugin
+    attributes:
+      label: Which plugin?
+      options:
+        - AudioAnalysisPlugin
+        - BluetoothPlaybackPlugin
+        - DrivingModePlugin
+        - EqualizerPlugin
+        - FavoritesPlugin
+        - LyricsPlugin
+        - MetadataEnrichmentPlugin
+        - QueuePresetPlugin
+        - ReplayGainPlugin
+        - RingtonePlugin
+        - ScrobblePlugin
+        - ShuffleRepeatPlugin
+        - SleepTimerPlugin
+        - SmartPlaylistPlugin
+        - SpotifyImportPlugin / SpotifyPlaybackPlugin
+        - TagEditorPlugin
+        - VisualizerPlugin
+        - YoutubeMusicImportPlugin / YoutubePlaybackPlugin
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-actual
+    attributes:
+      label: Expected vs. actual
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: false
+
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      placeholder: "e.g. Android 14, Windows 11"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Plugin Health entry
+      render: shell
+    validations:
+      required: false
