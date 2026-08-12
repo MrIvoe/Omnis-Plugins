@@ -46,6 +46,19 @@ import 'package:omnis_plugins/youtube_playback_plugin.dart';
 /// tried before that plugin's always-non-empty objective fallback (see
 /// `IQueueBuilder`'s doc in `service_interfaces.dart`).
 ///
+/// Two plugins have a *documented initialization-order dependency* rather
+/// than just a dispatch-order preference: `QueuePresetPlugin` (must come
+/// after `SmartPlaylistPlugin`, for the `IQueueBuilder` reason above) and
+/// `EqualizerPlugin` (must come after `BluetoothPlaybackPlugin`, whose
+/// `initialize()` registers `IDeviceConnectivityProvider`, which
+/// `EqualizerPlugin.initialize()` reads). Both override
+/// `MusicPlugin.requiresSequentialInit` to `true` so Omnis's
+/// `PluginManager.initializeAll()` — which otherwise initializes every
+/// bundled plugin concurrently — holds them back to a second round that
+/// only starts once every other plugin has finished. This list's own
+/// ordering no longer has to get that right on its own as a result, but
+/// is still written correctly below for readability.
+///
 /// Each entry is a factory, constructed one at a time inside a `try`/
 /// `catch` below rather than as one list-literal expression — a single
 /// constructor throwing must not take the other 19 plugins down with
@@ -60,7 +73,6 @@ List<MusicPlugin> createBundledPlugins() {
     () => ShuffleRepeatPlugin(),
     () => ReplayGainPlugin(),
     () => LyricsPlugin(),
-    () => EqualizerPlugin(),
     () => FavoritesPlugin(),
     () => VisualizerPlugin(),
     () => SmartPlaylistPlugin(),
@@ -75,6 +87,7 @@ List<MusicPlugin> createBundledPlugins() {
     () => YoutubeMusicImportPlugin(),
     () => YoutubePlaybackPlugin(),
     () => BluetoothPlaybackPlugin(),
+    () => EqualizerPlugin(),
     () => RingtonePlugin(),
     () => DrivingModePlugin(),
   ];

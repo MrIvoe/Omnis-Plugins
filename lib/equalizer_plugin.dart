@@ -190,6 +190,15 @@ class EqualizerPlugin extends MusicPlugin {
   @override
   String get author => 'Omnis Team';
 
+  // Must initialize after BluetoothPlaybackPlugin — see the class doc
+  // above and bundled_plugins.dart's ordering note. initialize() below
+  // reads IDeviceConnectivityProvider, which BluetoothPlaybackPlugin only
+  // registers inside its own initialize(); under PluginManager's parallel
+  // initializeAll() round, that registration isn't guaranteed to exist
+  // yet without this flag.
+  @override
+  bool get requiresSequentialInit => true;
+
   @override
   Future<void> initialize() async {
     final provider =

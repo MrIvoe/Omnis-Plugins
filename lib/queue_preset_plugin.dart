@@ -111,6 +111,14 @@ class QueuePresetPlugin extends MusicPlugin implements IQueueBuilder {
   @override
   String get author => 'Omnis Team';
 
+  // Must initialize after SmartPlaylistPlugin — see the class doc above
+  // and bundled_plugins.dart's ordering note. Without this, this plugin's
+  // always-non-empty fallback can register under IQueueBuilder before
+  // SmartPlaylistPlugin's curated match does, under PluginManager's
+  // parallel initializeAll() round.
+  @override
+  bool get requiresSequentialInit => true;
+
   @override
   Future<void> initialize() async {
     context?.services.register(IQueueBuilder, this);
