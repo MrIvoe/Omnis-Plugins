@@ -52,6 +52,7 @@ for the two that need a physical device to verify at all.
 | `LyricsPlugin` | Manual or auto-fetched (lrclib.net) synced lyrics | Network | No caveat noted |
 | `MetadataEnrichmentPlugin` | Canonical track info + genre/mood tags from MusicBrainz/Last.fm/Discogs | Network | No caveat noted |
 | `QueuePresetPlugin` | Chill/Focus/Workout/Sleep queues from BPM + genre keywords | None | No caveat noted |
+| `RatingsPlugin` | 0-5 star rating per track | None | No caveat noted |
 | `ReplayGainPlugin` | Loudness normalization from ReplayGain tags | None | No caveat noted |
 | `RingtonePlugin` | Set a track as ringtone/notification/alarm (Android only) | Write settings (`set_ringtone`) | ⚠️ Implemented against `set_ringtone`'s documented API; not exercised against a real Android device |
 | `ScrobblePlugin` | Play history for recently-played/most-played lists | None | No caveat noted |
