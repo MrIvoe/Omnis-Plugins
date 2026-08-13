@@ -8,6 +8,7 @@ import 'package:omnis_plugins/favorites_plugin.dart';
 import 'package:omnis_plugins/lyrics_plugin.dart';
 import 'package:omnis_plugins/metadata_enrichment_plugin.dart';
 import 'package:omnis_plugins/queue_preset_plugin.dart';
+import 'package:omnis_plugins/radio_plugin.dart';
 import 'package:omnis_plugins/ratings_plugin.dart';
 import 'package:omnis_plugins/replay_gain_plugin.dart';
 import 'package:omnis_plugins/ringtone_plugin.dart';
@@ -79,6 +80,7 @@ List<MusicPlugin> createBundledPlugins() {
     () => VisualizerPlugin(),
     () => SmartPlaylistPlugin(),
     () => QueuePresetPlugin(),
+    () => RadioPlugin(),
     () => ScrobblePlugin(),
     () => MetadataEnrichmentPlugin(),
     () => ArtistImagePlugin(),
