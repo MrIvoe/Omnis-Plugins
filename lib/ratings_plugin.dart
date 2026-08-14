@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:omnis_plugin_api/base_track.dart';
 import 'package:omnis_plugin_api/plugin_interface.dart';
+import 'package:omnis_plugin_api/service_interfaces.dart';
 
 /// A 0–5 star rating per track — §9 of the Omnis 2.0 product spec lists
 /// "Rating 0–5" alongside Favorite/play count/skip count as part of the
@@ -18,7 +19,7 @@ import 'package:omnis_plugin_api/plugin_interface.dart';
 /// found and fixed in several of Omnis's own stores (`LibraryStore`,
 /// `PlaylistStore`, `PlayHistoryStore`) this cycle applies just as much
 /// here, so it's built in from the start rather than retrofitted later.
-class RatingsPlugin extends MusicPlugin {
+class RatingsPlugin extends MusicPlugin implements IRatingsProvider {
   static const _ratingsKey = 'ratings_json';
 
   Map<String, int> _load() {
@@ -45,6 +46,7 @@ class RatingsPlugin extends MusicPlugin {
       storage.setString(_ratingsKey, jsonEncode(ratings));
 
   /// A track's rating, or 0 ("unrated") if it has none.
+  @override
   int ratingOf(String trackId) => _load()[trackId] ?? 0;
 
   /// Sets [trackId]'s rating. [rating] must be 0 (clears the rating) to 5
@@ -72,11 +74,14 @@ class RatingsPlugin extends MusicPlugin {
   /// Total number of rated tracks, for the settings page.
   int get count => _load().length;
 
-  /// Every track in [tracks] rated at least [minRating] (1-5) — the
-  /// building block for a future `rating:>=4` search operator (§6) and
-  /// smart-playlist rule (§8), neither of which exist yet; exposed now so
-  /// this plugin is ready for them without changing its storage shape
-  /// later.
+  /// Every track in [tracks] rated at least [minRating] (1-5) — real
+  /// consumers now exist for both cases this was originally written
+  /// ahead of: the Omnis app's own `rating:>=4` search qualifier
+  /// (`lib/core/library_search.dart`) calls [ratingOf] directly rather
+  /// than this helper (it filters its own already-loaded track list),
+  /// and `SmartPlaylistPlugin`'s rule engine reaches [ratingOf] through
+  /// the newly-registered [IRatingsProvider] interface below, not a
+  /// direct reference to this plugin.
   List<BaseTrack> ratedAtLeast(List<BaseTrack> tracks, int minRating) {
     final ratings = _load();
     return tracks.where((t) => (ratings[t.id] ?? 0) >= minRating).toList();
@@ -105,7 +110,9 @@ class RatingsPlugin extends MusicPlugin {
   String get author => 'Omnis Team';
 
   @override
-  Future<void> initialize() async {}
+  Future<void> initialize() async {
+    context?.services.register(IRatingsProvider, this);
+  }
 
   @override
   Future<void> onTrackStart(BaseTrack track) async {}
@@ -118,7 +125,19 @@ class RatingsPlugin extends MusicPlugin {
       locationID == 'plugin_settings' ? _RatingsSettings(plugin: this) : null;
 
   @override
-  Future<void> dispose() async {}
+  Future<void> enable() async {
+    context?.services.register(IRatingsProvider, this);
+  }
+
+  @override
+  Future<void> disable() async {
+    context?.services.unregister(IRatingsProvider, this);
+  }
+
+  @override
+  Future<void> dispose() async {
+    context?.services.unregister(IRatingsProvider, this);
+  }
 }
 
 /// This plugin's own settings — reached by tapping it in the Plugins

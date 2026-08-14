@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omnis_plugin_api/base_track.dart';
+import 'package:omnis_plugin_api/service_interfaces.dart';
 import 'package:omnis_plugins/ratings_plugin.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -170,6 +171,16 @@ void main() {
           .setString('ratings_json', jsonEncode([1, 2, 3]));
 
       expect(plugin.count, 0);
+    });
+  });
+
+  group('IRatingsProvider (item 42)', () {
+    test('RatingsPlugin implements IRatingsProvider — reachable by '
+        'another plugin through the capability interface, not just as '
+        'a concrete RatingsPlugin reference. Full registration/'
+        'cross-plugin wiring is exercised in the main Omnis repo\'s '
+        'test suite, where a real PluginContext exists.', () {
+      expect(RatingsPlugin(), isA<IRatingsProvider>());
     });
   });
 }
