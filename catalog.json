@@ -1,0 +1,7 @@
+[
+  {
+    "folder": "sample_logger",
+    "name": "Sample Logger",
+    "description": "Minimal example plugin — logs track starts and library scans. Good starting point for writing your own."
+  }
+]
