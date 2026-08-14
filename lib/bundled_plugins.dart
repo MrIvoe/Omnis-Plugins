@@ -9,6 +9,7 @@ import 'package:omnis_plugins/jellyfin_plugin.dart';
 import 'package:omnis_plugins/lyrics_plugin.dart';
 import 'package:omnis_plugins/metadata_enrichment_plugin.dart';
 import 'package:omnis_plugins/opensubsonic_plugin.dart';
+import 'package:omnis_plugins/plex_plugin.dart';
 import 'package:omnis_plugins/queue_preset_plugin.dart';
 import 'package:omnis_plugins/radio_plugin.dart';
 import 'package:omnis_plugins/ratings_plugin.dart';
@@ -87,6 +88,7 @@ List<MusicPlugin> createBundledPlugins() {
     () => MetadataEnrichmentPlugin(),
     () => OpenSubsonicPlugin(),
     () => JellyfinPlugin(),
+    () => PlexPlugin(),
     () => ArtistImagePlugin(),
     () => AudioAnalysisPlugin(),
     () => TagEditorPlugin(),
