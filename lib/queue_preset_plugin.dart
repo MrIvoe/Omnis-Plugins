@@ -5,6 +5,18 @@ import 'package:omnis_plugin_api/base_track.dart';
 import 'package:omnis_plugin_api/plugin_interface.dart';
 import 'package:omnis_plugin_api/service_interfaces.dart';
 
+/// How many of a listener's top plays to consider "favorites" for the
+/// [QueuePresetPlugin.presets] name of that name — wide enough to
+/// include real listening habit, narrow enough that "forgotten" still
+/// means something (the whole library ranked by play count would just
+/// be "most played," a different, already-existing view).
+const _forgottenFavoritesCandidatePool = 200;
+
+/// How many of a listener's most-recent plays count as "not forgotten"
+/// — a track played within this window is still active listening, not
+/// something to be reminded of.
+const _forgottenFavoritesRecentWindow = 30;
+
 /// Curated queue presets built from objective, always-available track data
 /// (genre keywords, BPM) — deliberately independent of `BaseTrack.mood`,
 /// which only ever gets populated by opt-in enrichment/analysis/manual
@@ -28,7 +40,13 @@ class QueuePresetPlugin extends MusicPlugin implements IQueueBuilder {
   static const _defaultWorkoutBpm = 120.0;
   static const _defaultSleepBpm = 80.0;
 
-  final List<String> presets = ['Chill', 'Focus', 'Workout', 'Sleep'];
+  final List<String> presets = [
+    'Chill',
+    'Focus',
+    'Workout',
+    'Sleep',
+    'Forgotten Favorites',
+  ];
 
   @override
   List<String> get supportedQueries => presets;
@@ -91,9 +109,56 @@ class QueuePresetPlugin extends MusicPlugin implements IQueueBuilder {
     return shuffled.take(limit).toList();
   }
 
+  /// "Forgotten Favorites" — real listening-history data (via
+  /// [IPlayHistoryProvider], today backed by `ScrobblePlugin`), not
+  /// BPM/genre like every other preset here: tracks among a listener's
+  /// most-played that haven't shown up in their most-*recent* plays,
+  /// i.e. things they clearly used to love and have since drifted away
+  /// from. One of the spec's named recommendation algorithms (§39) —
+  /// previously none of them existed anywhere in either repo despite
+  /// `FavoritesPlugin`/`RatingsPlugin`/`ScrobblePlugin` all already
+  /// collecting real signal nothing consumed.
+  ///
+  /// Deliberately returns an **empty** list rather than [buildQueue]'s
+  /// whole-library shuffle fallback when there's no real history yet —
+  /// unlike "Workout"/"Sleep," which describe a track's own objective
+  /// properties and so can reasonably fall back to "something in that
+  /// spirit," "Forgotten Favorites" is a claim about *this listener's
+  /// actual history*; a shuffled library isn't a smaller version of that
+  /// claim, it's a different, misleading one.
+  List<BaseTrack> _buildForgottenFavorites(
+    List<BaseTrack> tracks, {
+    int limit = 50,
+    Random? random,
+  }) {
+    final history = context?.services.get<IPlayHistoryProvider>();
+    if (history == null) return const [];
+    final mostPlayed =
+        history.mostPlayedIds(limit: _forgottenFavoritesCandidatePool);
+    if (mostPlayed.isEmpty) return const [];
+    final recentIds = history
+        .recentlyPlayed(limit: _forgottenFavoritesRecentWindow)
+        .map((r) => r.trackId)
+        .toSet();
+    final byId = {for (final t in tracks) t.id: t};
+    final forgotten = mostPlayed
+        .map((entry) => entry.key)
+        .where((id) => !recentIds.contains(id))
+        .map((id) => byId[id])
+        .whereType<BaseTrack>()
+        .toList();
+    if (forgotten.isEmpty) return const [];
+    final shuffled = List<BaseTrack>.from(forgotten)..shuffle(random);
+    return shuffled.take(limit).toList();
+  }
+
   @override
-  List<BaseTrack> buildQueueFor(List<BaseTrack> tracks, String query) =>
-      buildQueue(tracks, query);
+  List<BaseTrack> buildQueueFor(List<BaseTrack> tracks, String query) {
+    if (query.toLowerCase() == 'forgotten favorites') {
+      return _buildForgottenFavorites(tracks);
+    }
+    return buildQueue(tracks, query);
+  }
 
   @override
   String get id => 'queue_presets';
