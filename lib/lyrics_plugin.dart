@@ -289,8 +289,24 @@ class LyricsPlugin extends MusicPlugin implements ILyricsProvider {
   String currentLyricFor(BaseTrack track, Duration position) {
     final timedLines = timedLyricFor(track);
     if (timedLines.isNotEmpty) {
+      if (position < timedLines.first.timestamp) {
+        // Nothing has started yet (an intro before the first synced
+        // line's own timestamp) — showing that first line early would
+        // be actively wrong, not just imprecise, the same way a
+        // karaoke display doesn't highlight the opening line during
+        // silence before it. Found by testing, not by inspection: the
+        // original `lastWhere(..., orElse: () => timedLines.first)`
+        // fell through to the first line for *any* position with no
+        // match, including one before the synced lyrics had begun at
+        // all, contradicting this class's own doc comment.
+        return '';
+      }
       final match = timedLines.lastWhere(
         (line) => line.timestamp <= position,
+        // Unreachable given the guard above, but kept as a defensive
+        // fallback rather than letting a future refactor turn a
+        // "should never happen" case into a thrown StateError — this
+        // method's own contract promises to always return non-null.
         orElse: () => timedLines.first,
       );
       return match.text;
