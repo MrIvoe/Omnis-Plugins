@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -219,6 +220,106 @@ class TrackTags {
 class TagEditorPlugin extends MusicPlugin implements IFileTagWriter {
   static const _autoTaggedTrackIdsKey = 'auto_tagged_track_ids';
 
+  /// Item 17's "no undo/backup/restore for tag edits" gap — a bad batch
+  /// auto-tag/re-tag run (`library_page.dart`'s bulk actions) was
+  /// previously unrecoverable. Persists, per file path, the tag field
+  /// values as they stood *immediately before* [writeTags]'s most recent
+  /// call for that file — a small JSON blob of strings, not a full-file
+  /// byte backup: a whole-file copy per edited track would scale with
+  /// library size (potentially thousands of multi-megabyte files in one
+  /// batch run) the way [PluginInstaller.backupPluginDirectory] can
+  /// afford to for a single plugin directory but this genuinely can't
+  /// for a library-wide operation. Deliberately holds only the *most
+  /// recent* snapshot per file, not a full history — undoing twice in a
+  /// row restores to the state one edit before the last undo, not an
+  /// arbitrary number of steps back, matching the "undo last edit," not
+  /// "full version history," scope this item actually asks for.
+  static const _undoSnapshotsKey = 'tag_edit_undo_snapshots';
+
+  Map<String, Map<String, String?>> _loadUndoSnapshots() {
+    final raw = storage.getString(_undoSnapshotsKey);
+    if (raw == null || raw.trim().isEmpty) return {};
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return {};
+      final snapshots = <String, Map<String, String?>>{};
+      for (final entry in decoded.entries) {
+        final key = entry.key;
+        final value = entry.value;
+        if (key is! String || value is! Map) continue;
+        snapshots[key] = value.map((k, v) => MapEntry(k.toString(), v?.toString()));
+      }
+      return snapshots;
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<void> _persistUndoSnapshots(
+          Map<String, Map<String, String?>> snapshots) =>
+      storage.setString(_undoSnapshotsKey, jsonEncode(snapshots));
+
+  Map<String, String?> _fieldsOf(TrackTags tags) => {
+        'title': tags.title,
+        'artist': tags.artist,
+        'album': tags.album,
+        'albumArtist': tags.albumArtist,
+        'genre': tags.genre,
+        'year': tags.year,
+        'track': tags.track,
+        'disc': tags.disc,
+        'composer': tags.composer,
+        'comment': tags.comment,
+        'bpm': tags.bpm,
+        'initialKey': tags.initialKey,
+        'mood': tags.mood,
+      };
+
+  /// Whether [filePath] has an undo snapshot available right now — the
+  /// UI uses this to enable/disable an "Undo last edit" action.
+  bool hasUndoSnapshot(String filePath) =>
+      _loadUndoSnapshots().containsKey(filePath);
+
+  /// Restores [filePath]'s tags to what they were immediately before its
+  /// most recent [writeTags] call. Returns `false` (a no-op) when there
+  /// is no snapshot for this file — nothing has been written to it since
+  /// this plugin last started, or a later real write has already
+  /// superseded it. Native title/artist/album fall back to an empty
+  /// string, not `null`, when the snapshot recorded no prior value —
+  /// unlike a `null` custom field (`writeTags` skips a `TXXX` frame
+  /// entirely when given `null`, correctly leaving an untouched one
+  /// alone), title/artist/album are *always* written through to the
+  /// encoder every call, so an empty string is what genuinely clears the
+  /// frame back to "the edit that added a title/artist/album where none
+  /// existed before" being fully undone, not left half-reverted.
+  ///
+  /// Deliberately does **not** clear its own restored state's snapshot
+  /// afterward: the [writeTags] call this makes is a real write like any
+  /// other, so it naturally creates a fresh snapshot of whatever was on
+  /// disk *before* the undo (the just-undone edit) — leaving that in
+  /// place is what makes calling [undoLastEdit] a second time toggle
+  /// back to the edit rather than becoming a permanent dead end.
+  Future<bool> undoLastEdit(String filePath) async {
+    final snapshot = _loadUndoSnapshots()[filePath];
+    if (snapshot == null) return false;
+    return writeTags(
+      filePath,
+      title: snapshot['title'] ?? '',
+      artist: snapshot['artist'] ?? '',
+      album: snapshot['album'] ?? '',
+      albumArtist: snapshot['albumArtist'],
+      genre: snapshot['genre'],
+      year: snapshot['year'],
+      track: snapshot['track'],
+      disc: snapshot['disc'],
+      composer: snapshot['composer'],
+      comment: snapshot['comment'],
+      bpm: snapshot['bpm'],
+      initialKey: snapshot['initialKey'],
+      mood: snapshot['mood'],
+    );
+  }
+
   /// [IFileTagWriter.writeLyrics] — writes [lyrics] as a `TXXX:LYRICS`
   /// custom frame, same mechanism [writeTags]'s `extraFields` uses for
   /// anything id3_codec can't write as a native frame. Used by
@@ -385,6 +486,16 @@ class TagEditorPlugin extends MusicPlugin implements IFileTagWriter {
       ));
 
       await file.writeAsBytes(updated, flush: true);
+
+      // Snapshot the *pre-write* tags for undoLastEdit, decoded from
+      // `original` (already in memory, no second disk read needed) —
+      // only recorded once the write has actually succeeded, so a
+      // failed write never leaves a stale/misleading undo point behind.
+      final beforeTags = _tagsFromBytes(original, includeArtwork: false);
+      final snapshots = _loadUndoSnapshots();
+      snapshots[filePath] = _fieldsOf(beforeTags);
+      await _persistUndoSnapshots(snapshots);
+
       return true;
     } catch (_) {
       return false;
