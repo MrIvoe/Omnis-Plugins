@@ -99,12 +99,13 @@ class SmartPlaylistPlugin extends MusicPlugin implements IQueueBuilder {
   /// Builds a queue from the saved rule with id [ruleId], evaluated
   /// fresh against [tracks]. Returns an empty list (never throws) for
   /// an unknown rule id, matching every other "no match" path in this
-  /// app. Reaches rating data through [IRatingsProvider] — a
-  /// capability lookup, not a direct reference to `RatingsPlugin`, so
-  /// this plugin works whether or not Ratings happens to be enabled
-  /// (a `rating:` condition in the rule just never matches without it,
-  /// the same "matches nothing without a supplied lookup" contract
-  /// `RuleCondition.matches` documents).
+  /// app. Reaches rating/favorite data through [IRatingsProvider]/
+  /// [IFavoritesProvider] — capability lookups, not a direct reference
+  /// to `RatingsPlugin`/`FavoritesPlugin`, so this plugin works whether
+  /// or not either is enabled (a `rating:`/`favorite:` condition in the
+  /// rule just never matches without its provider, the same "matches
+  /// nothing without a supplied lookup" contract `RuleCondition.matches`
+  /// documents).
   List<BaseTrack> buildQueueForRule(List<BaseTrack> tracks, String ruleId) {
     SmartPlaylistRule? rule;
     for (final candidate in savedRules) {
@@ -115,7 +116,12 @@ class SmartPlaylistPlugin extends MusicPlugin implements IQueueBuilder {
     }
     if (rule == null) return const [];
     final ratingsProvider = context?.services.get<IRatingsProvider>();
-    return rule.apply(tracks, ratingOf: ratingsProvider?.ratingOf);
+    final favoritesProvider = context?.services.get<IFavoritesProvider>();
+    return rule.apply(
+      tracks,
+      ratingOf: ratingsProvider?.ratingOf,
+      favoriteOf: favoritesProvider?.isFavorite,
+    );
   }
 
   @override
@@ -222,6 +228,7 @@ class _SmartPlaylistSettingsState extends State<_SmartPlaylistSettings> {
         RuleField.mood => 'Mood',
         RuleField.year => 'Year',
         RuleField.rating => 'Rating',
+        RuleField.favorite => 'Favorite',
       };
 
   /// String fields support `contains` and `equals` — `RuleCondition
@@ -232,17 +239,23 @@ class _SmartPlaylistSettingsState extends State<_SmartPlaylistSettings> {
   /// since `contains` is the more commonly useful choice for free-text
   /// fields and stays the default for a newly added condition row
   /// (`_EditableCondition.operator`'s initial value). Numeric fields
-  /// (`year`/`rating`) get the full comparison set.
-  static List<RuleOperator> _operatorsFor(RuleField field) =>
-      field == RuleField.year || field == RuleField.rating
-          ? const [
-              RuleOperator.equals,
-              RuleOperator.greaterThanOrEqual,
-              RuleOperator.lessThanOrEqual,
-              RuleOperator.greaterThan,
-              RuleOperator.lessThan,
-            ]
-          : const [RuleOperator.contains, RuleOperator.equals];
+  /// (`year`/`rating`) get the full comparison set. `favorite` only
+  /// ever uses `equals` — the other operators don't mean anything for a
+  /// boolean field, matching `RuleCondition._matchesBoolean`'s own
+  /// contract.
+  static List<RuleOperator> _operatorsFor(RuleField field) {
+    if (field == RuleField.year || field == RuleField.rating) {
+      return const [
+        RuleOperator.equals,
+        RuleOperator.greaterThanOrEqual,
+        RuleOperator.lessThanOrEqual,
+        RuleOperator.greaterThan,
+        RuleOperator.lessThan,
+      ];
+    }
+    if (field == RuleField.favorite) return const [RuleOperator.equals];
+    return const [RuleOperator.contains, RuleOperator.equals];
+  }
 
   static String _operatorLabel(RuleOperator op) => switch (op) {
         RuleOperator.contains => 'contains',
@@ -575,7 +588,20 @@ class _SmartPlaylistSettingsState extends State<_SmartPlaylistSettings> {
                     ))
                 .toList(),
             onChanged: (value) {
-              if (value != null) setState(() => condition.field = value);
+              if (value == null) return;
+              setState(() {
+                condition.field = value;
+                // A boolean field needs a real true/false value, not
+                // whatever free text happened to be left over from a
+                // different field — default it the moment the row
+                // switches into `favorite`, so the dropdown below and
+                // the underlying controller text never disagree.
+                if (value == RuleField.favorite &&
+                    condition.valueController.text != 'true' &&
+                    condition.valueController.text != 'false') {
+                  condition.valueController.text = 'true';
+                }
+              });
             },
           ),
           const SizedBox(width: 8),
@@ -593,14 +619,31 @@ class _SmartPlaylistSettingsState extends State<_SmartPlaylistSettings> {
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: TextField(
-              controller: condition.valueController,
-              decoration: const InputDecoration(
-                hintText: 'Value',
-                border: OutlineInputBorder(),
-                isDense: true,
-              ),
-            ),
+            child: condition.field == RuleField.favorite
+                ? DropdownButton<String>(
+                    isExpanded: true,
+                    value: condition.valueController.text == 'false'
+                        ? 'false'
+                        : 'true',
+                    items: const [
+                      DropdownMenuItem(value: 'true', child: Text('Favorited')),
+                      DropdownMenuItem(
+                          value: 'false', child: Text('Not favorited')),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() => condition.valueController.text = value);
+                      }
+                    },
+                  )
+                : TextField(
+                    controller: condition.valueController,
+                    decoration: const InputDecoration(
+                      hintText: 'Value',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
           ),
           if (_editableConditions.length > 1)
             IconButton(

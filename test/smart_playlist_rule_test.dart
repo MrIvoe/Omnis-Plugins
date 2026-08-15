@@ -184,6 +184,92 @@ void main() {
     });
   });
 
+  group('RuleCondition — favorite field', () {
+    bool favoriteOf(String id) => id == 'loved';
+
+    test('equals true matches only favorited tracks', () {
+      const condition = RuleCondition(
+        field: RuleField.favorite,
+        operator: RuleOperator.equals,
+        value: 'true',
+      );
+      expect(
+        condition.matches(_track(id: 'loved'), favoriteOf: favoriteOf),
+        isTrue,
+      );
+      expect(
+        condition.matches(_track(id: 'not-loved'), favoriteOf: favoriteOf),
+        isFalse,
+      );
+    });
+
+    test('equals false matches only non-favorited tracks', () {
+      const condition = RuleCondition(
+        field: RuleField.favorite,
+        operator: RuleOperator.equals,
+        value: 'false',
+      );
+      expect(
+        condition.matches(_track(id: 'loved'), favoriteOf: favoriteOf),
+        isFalse,
+      );
+      expect(
+        condition.matches(_track(id: 'not-loved'), favoriteOf: favoriteOf),
+        isTrue,
+      );
+    });
+
+    test('accepts yes/no/1/0 as well as true/false', () {
+      final yes = const RuleCondition(
+              field: RuleField.favorite,
+              operator: RuleOperator.equals,
+              value: 'yes')
+          .matches(_track(id: 'loved'), favoriteOf: favoriteOf);
+      final one = const RuleCondition(
+              field: RuleField.favorite,
+              operator: RuleOperator.equals,
+              value: '1')
+          .matches(_track(id: 'loved'), favoriteOf: favoriteOf);
+      expect(yes, isTrue);
+      expect(one, isTrue);
+    });
+
+    test('a non-equals operator matches nothing rather than throwing', () {
+      const condition = RuleCondition(
+        field: RuleField.favorite,
+        operator: RuleOperator.contains,
+        value: 'true',
+      );
+      expect(
+        condition.matches(_track(id: 'loved'), favoriteOf: favoriteOf),
+        isFalse,
+      );
+    });
+
+    test('an unrecognized value matches nothing rather than throwing', () {
+      const condition = RuleCondition(
+        field: RuleField.favorite,
+        operator: RuleOperator.equals,
+        value: 'maybe',
+      );
+      expect(
+        condition.matches(_track(id: 'loved'), favoriteOf: favoriteOf),
+        isFalse,
+      );
+    });
+
+    test('matches nothing when no favoriteOf is supplied — same "don\'t '
+        'silently ignore a field the caller didn\'t wire up" stance '
+        'rating already established', () {
+      const condition = RuleCondition(
+        field: RuleField.favorite,
+        operator: RuleOperator.equals,
+        value: 'true',
+      );
+      expect(condition.matches(_track(id: 'loved')), isFalse);
+    });
+  });
+
   group('RuleCondition JSON round-trip', () {
     test('toJson/fromJson round-trips exactly', () {
       const condition = RuleCondition(
@@ -219,6 +305,57 @@ void main() {
             {'field': 'title', 'operator': 'equals', 'value': 123}),
         isNull,
       );
+    });
+
+    test('a favorite condition round-trips exactly too', () {
+      const condition = RuleCondition(
+        field: RuleField.favorite,
+        operator: RuleOperator.equals,
+        value: 'true',
+      );
+      final decoded = RuleCondition.fromJson(condition.toJson());
+      expect(decoded!.field, RuleField.favorite);
+      expect(decoded.operator, RuleOperator.equals);
+      expect(decoded.value, 'true');
+    });
+  });
+
+  group('SmartPlaylistRule — favoriteOf threading', () {
+    test('apply() passes favoriteOf through to a favorite: condition',
+        () {
+      final rule = SmartPlaylistRule(
+        id: '1',
+        name: 'My Favorites',
+        matchType: RuleMatchType.all,
+        conditions: const [
+          RuleCondition(
+            field: RuleField.favorite,
+            operator: RuleOperator.equals,
+            value: 'true',
+          ),
+        ],
+      );
+      final tracks = [_track(id: 'loved'), _track(id: 'not-loved')];
+      final result = rule.apply(tracks, favoriteOf: (id) => id == 'loved');
+      expect(result.map((t) => t.id), ['loved']);
+    });
+
+    test('apply() with no favoriteOf makes a favorite: condition match '
+        'nothing, same as an unsupplied ratingOf', () {
+      final rule = SmartPlaylistRule(
+        id: '1',
+        name: 'My Favorites',
+        matchType: RuleMatchType.all,
+        conditions: const [
+          RuleCondition(
+            field: RuleField.favorite,
+            operator: RuleOperator.equals,
+            value: 'true',
+          ),
+        ],
+      );
+      final tracks = [_track(id: 'loved')];
+      expect(rule.apply(tracks), isEmpty);
     });
   });
 

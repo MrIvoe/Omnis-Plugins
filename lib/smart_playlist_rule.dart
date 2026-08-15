@@ -18,7 +18,7 @@ T? _firstWhereOrNull<T>(Iterable<T> items, bool Function(T) test) {
 /// same kind of thing — "does this track's X satisfy Y" — just reached
 /// through a structured rule-builder UI instead of typed `field:value`
 /// syntax.
-enum RuleField { title, artist, album, genre, mood, year, rating }
+enum RuleField { title, artist, album, genre, mood, year, rating, favorite }
 
 /// How a condition's [RuleCondition.value] is compared against a
 /// track's field. String fields (`title`/`artist`/`album`/`genre`/
@@ -52,16 +52,20 @@ class RuleCondition {
     required this.value,
   });
 
-  /// Whether [track] satisfies this single condition. [ratingOf] is the
-  /// same caller-supplied lookup `library_search.dart`'s `rating:`
-  /// qualifier uses — this stays plugin-storage-free itself, the same
-  /// "pure function, caller supplies the join data" design that file's
-  /// own doc comment already settled on. Never throws: an operator that
-  /// doesn't make sense for a field (e.g. `greaterThan` on `artist`)
-  /// simply matches nothing, the same "a bad combination finds nothing,
-  /// not a crash" contract `library_search.dart` uses for a malformed
-  /// query.
-  bool matches(BaseTrack track, {int Function(String trackId)? ratingOf}) {
+  /// Whether [track] satisfies this single condition. [ratingOf]/
+  /// [favoriteOf] are the same caller-supplied lookups
+  /// `library_search.dart`'s `rating:`/`favorite:` qualifiers use — this
+  /// stays plugin-storage-free itself, the same "pure function, caller
+  /// supplies the join data" design that file's own doc comment already
+  /// settled on. Never throws: an operator that doesn't make sense for a
+  /// field (e.g. `greaterThan` on `artist`) simply matches nothing, the
+  /// same "a bad combination finds nothing, not a crash" contract
+  /// `library_search.dart` uses for a malformed query.
+  bool matches(
+    BaseTrack track, {
+    int Function(String trackId)? ratingOf,
+    bool Function(String trackId)? favoriteOf,
+  }) {
     switch (field) {
       case RuleField.title:
         return _matchesString(track.title);
@@ -78,6 +82,9 @@ class RuleCondition {
       case RuleField.rating:
         if (ratingOf == null) return false;
         return _matchesNumber(ratingOf(track.id));
+      case RuleField.favorite:
+        if (favoriteOf == null) return false;
+        return _matchesBoolean(favoriteOf(track.id));
     }
   }
 
@@ -89,6 +96,21 @@ class RuleCondition {
     final h = haystack.toLowerCase();
     final v = value.toLowerCase();
     return operator == RuleOperator.equals ? h == v : h.contains(v);
+  }
+
+  /// `favorite` only ever uses [RuleOperator.equals] — `>`/`>=`/`<`/`<=`/
+  /// `contains` don't mean anything for a boolean field, so they match
+  /// nothing, the same "an inapplicable operator finds nothing" contract
+  /// [_matchesNumber] already has for `contains` on a numeric field.
+  /// Accepts `true`/`false`/`yes`/`no`/`1`/`0` (case-insensitive), the
+  /// same forgiving value set `library_search.dart`'s `favorite:`/
+  /// `lyrics:` qualifiers already accept.
+  bool _matchesBoolean(bool trackValue) {
+    if (operator != RuleOperator.equals) return false;
+    final v = value.toLowerCase();
+    if (v == 'true' || v == 'yes' || v == '1') return trackValue;
+    if (v == 'false' || v == 'no' || v == '0') return !trackValue;
+    return false;
   }
 
   bool _matchesNumber(int? trackValue) {
@@ -156,19 +178,29 @@ class SmartPlaylistRule {
   List<BaseTrack> apply(
     List<BaseTrack> library, {
     int Function(String trackId)? ratingOf,
+    bool Function(String trackId)? favoriteOf,
   }) {
     if (conditions.isEmpty) return const [];
-    return library.where((track) => _matchesTrack(track, ratingOf)).toList();
+    return library
+        .where((track) => _matchesTrack(track, ratingOf, favoriteOf))
+        .toList();
   }
 
-  bool _matchesTrack(BaseTrack track, int Function(String)? ratingOf) {
+  bool _matchesTrack(
+    BaseTrack track,
+    int Function(String)? ratingOf,
+    bool Function(String)? favoriteOf,
+  ) {
     switch (matchType) {
       case RuleMatchType.all:
-        return conditions.every((c) => c.matches(track, ratingOf: ratingOf));
+        return conditions.every((c) =>
+            c.matches(track, ratingOf: ratingOf, favoriteOf: favoriteOf));
       case RuleMatchType.any:
-        return conditions.any((c) => c.matches(track, ratingOf: ratingOf));
+        return conditions.any((c) =>
+            c.matches(track, ratingOf: ratingOf, favoriteOf: favoriteOf));
       case RuleMatchType.none:
-        return conditions.every((c) => !c.matches(track, ratingOf: ratingOf));
+        return conditions.every((c) =>
+            !c.matches(track, ratingOf: ratingOf, favoriteOf: favoriteOf));
     }
   }
 

@@ -184,6 +184,71 @@ void main() {
       expect(matched.map((t) => t.id), ['1']);
     });
   });
+
+  group('favorite field (item 39/42)', () {
+    testWidgets('switching the field dropdown to Favorite swaps the value '
+        'text field for a Favorited/Not favorited dropdown', (tester) async {
+      await pumpSettings(tester);
+
+      await tester.tap(find.byType(DropdownButton<RuleField>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Favorite').last);
+      await tester.pumpAndSettle();
+
+      expect(find.widgetWithText(TextField, 'Value'), findsNothing);
+      expect(find.text('Favorited'), findsOneWidget);
+    });
+
+    testWidgets('saving a Favorite condition (default "Favorited") builds '
+        'a rule with field: favorite, operator: equals, value: "true"',
+        (tester) async {
+      final plugin = await pumpSettings(tester);
+
+      await tester.tap(find.byType(DropdownButton<RuleField>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Favorite').last);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+          find.widgetWithText(TextField, 'Name'), 'Loved Tracks');
+      await tester.ensureVisible(find.text('Save'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      final saved =
+          plugin.savedRules.firstWhere((r) => r.name == 'Loved Tracks');
+      expect(saved.conditions.single.field, RuleField.favorite);
+      expect(saved.conditions.single.operator, RuleOperator.equals);
+      expect(saved.conditions.single.value, 'true');
+    });
+
+    testWidgets('switching the value dropdown to "Not favorited" builds a '
+        'rule with value: "false"', (tester) async {
+      final plugin = await pumpSettings(tester);
+
+      await tester.tap(find.byType(DropdownButton<RuleField>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Favorite').last);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(DropdownButton<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Not favorited').last);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+          find.widgetWithText(TextField, 'Name'), 'Not Loved');
+      await tester.ensureVisible(find.text('Save'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      final saved =
+          plugin.savedRules.firstWhere((r) => r.name == 'Not Loved');
+      expect(saved.conditions.single.value, 'false');
+    });
+  });
 }
 
 BaseTrack _track({required String id, List<String> artists = const []}) =>
