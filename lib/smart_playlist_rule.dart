@@ -22,7 +22,8 @@ enum RuleField { title, artist, album, genre, mood, year, rating }
 
 /// How a condition's [RuleCondition.value] is compared against a
 /// track's field. String fields (`title`/`artist`/`album`/`genre`/
-/// `mood`) only ever use [contains]; numeric fields (`year`/`rating`)
+/// `mood`) support [contains] and [equals] (both case-insensitive, see
+/// [RuleCondition._matchesString]); numeric fields (`year`/`rating`)
 /// support the full comparison set — mirroring exactly which operators
 /// `library_search.dart`'s `year:`/`rating:` qualifiers already support.
 enum RuleOperator {

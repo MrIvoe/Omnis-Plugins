@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:omnis_plugin_api/base_track.dart';
 import 'package:omnis_plugins/smart_playlist_plugin.dart';
 import 'package:omnis_plugins/smart_playlist_rule.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -119,4 +120,78 @@ void main() {
     expect(find.text('Save'), findsOneWidget);
     expect(find.text('Create a smart playlist'), findsOneWidget);
   });
+
+  group('string-field operator choice (item 42)', () {
+    testWidgets('a string field (the default, Artist) offers both '
+        '"contains" and "=" in its operator dropdown, not just "contains"',
+        (tester) async {
+      await pumpSettings(tester);
+
+      await tester.tap(find.byType(DropdownButton<RuleOperator>));
+      await tester.pumpAndSettle();
+
+      expect(find.text('contains'), findsWidgets);
+      expect(find.text('='), findsWidgets);
+    });
+
+    testWidgets('selecting "=" and saving builds a rule whose condition '
+        'actually uses RuleOperator.equals, not contains', (tester) async {
+      final plugin = await pumpSettings(tester);
+
+      await tester.tap(find.byType(DropdownButton<RuleOperator>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('=').last);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+          find.widgetWithText(TextField, 'Name'), 'Exact Queen');
+      await tester.enterText(find.widgetWithText(TextField, 'Value'), 'Queen');
+      await tester.ensureVisible(find.text('Save'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      final saved = plugin.savedRules.firstWhere((r) => r.name == 'Exact Queen');
+      expect(saved.conditions.single.field, RuleField.artist);
+      expect(saved.conditions.single.operator, RuleOperator.equals);
+      expect(saved.conditions.single.value, 'Queen');
+    });
+
+    testWidgets('an "=" condition on a string field behaves as an exact, '
+        'case-insensitive match in a real playback build, genuinely '
+        'different from "contains" — proves the UI wiring reaches real '
+        'matching behavior, not just that the value round-trips',
+        (tester) async {
+      final plugin = await pumpSettings(tester);
+
+      await tester.tap(find.byType(DropdownButton<RuleOperator>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('=').last);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+          find.widgetWithText(TextField, 'Name'), 'Exact Queen');
+      await tester.enterText(find.widgetWithText(TextField, 'Value'), 'queen');
+      await tester.ensureVisible(find.text('Save'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      final saved = plugin.savedRules.firstWhere((r) => r.name == 'Exact Queen');
+      final exactMatch = _track(id: '1', artists: const ['Queen']);
+      final partialOnly = _track(id: '2', artists: const ['Queen tribute band']);
+      final matched = saved.apply([exactMatch, partialOnly]);
+      expect(matched.map((t) => t.id), ['1']);
+    });
+  });
 }
+
+BaseTrack _track({required String id, List<String> artists = const []}) =>
+    BaseTrack(
+      id: id,
+      title: 'T$id',
+      artists: artists,
+      album: 'Album',
+      duration: 180,
+      type: TrackType.local,
+    );

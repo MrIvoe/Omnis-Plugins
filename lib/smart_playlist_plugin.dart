@@ -224,11 +224,15 @@ class _SmartPlaylistSettingsState extends State<_SmartPlaylistSettings> {
         RuleField.rating => 'Rating',
       };
 
-  /// String fields only ever support `contains` in this UI (matching
-  /// `RuleCondition.matches`'s own behavior — an `equals` on a string
-  /// field is technically supported by the model but adds little for a
-  /// simple builder); numeric fields (`year`/`rating`) get the full
-  /// comparison set.
+  /// String fields support `contains` and `equals` — `RuleCondition
+  /// .matches` has always evaluated `equals` correctly for a string
+  /// field (case-insensitive exact match, same as `contains`'s own
+  /// case-insensitivity), this was previously just a builder-UI
+  /// restriction rather than a model limitation. `equals` listed second
+  /// since `contains` is the more commonly useful choice for free-text
+  /// fields and stays the default for a newly added condition row
+  /// (`_EditableCondition.operator`'s initial value). Numeric fields
+  /// (`year`/`rating`) get the full comparison set.
   static List<RuleOperator> _operatorsFor(RuleField field) =>
       field == RuleField.year || field == RuleField.rating
           ? const [
@@ -238,7 +242,7 @@ class _SmartPlaylistSettingsState extends State<_SmartPlaylistSettings> {
               RuleOperator.greaterThan,
               RuleOperator.lessThan,
             ]
-          : const [RuleOperator.contains];
+          : const [RuleOperator.contains, RuleOperator.equals];
 
   static String _operatorLabel(RuleOperator op) => switch (op) {
         RuleOperator.contains => 'contains',
