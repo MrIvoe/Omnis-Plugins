@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omnis_plugin_api/base_track.dart';
 import 'package:omnis_plugins/favorites_plugin.dart';
@@ -14,13 +16,13 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  BaseTrack track(String id) => BaseTrack(
+  BaseTrack track(String id, {TrackType type = TrackType.local}) => BaseTrack(
         id: id,
         title: 'T$id',
         artists: const ['Artist'],
         album: 'Album',
         duration: 180,
-        type: TrackType.local,
+        type: type,
       );
 
   test('a track is not a favorite until marked', () {
@@ -84,5 +86,129 @@ void main() {
     expect(plugin.count, 0);
     expect(plugin.isFavorite('a'), isFalse);
     expect(plugin.isFavorite('b'), isFalse);
+  });
+
+  group('favoritesWithSnapshots', () {
+    test('empty favorites returns empty', () {
+      final plugin = FavoritesPlugin();
+      expect(plugin.favoritesWithSnapshots(const []), isEmpty);
+    });
+
+    test('a scanned-library track is returned from the library, no '
+        'snapshot needed', () async {
+      final plugin = FavoritesPlugin();
+      final a = track('a');
+      await plugin.setFavorite('a', true, track: a);
+      expect(plugin.favoritesWithSnapshots([a]).map((t) => t.id), ['a']);
+    });
+
+    test('a non-local favorited track absent from the local library is '
+        'still surfaced, reconstructed from its snapshot', () async {
+      final plugin = FavoritesPlugin();
+      final station = track('radio:1', type: TrackType.radio);
+      await plugin.setFavorite(station.id, true, track: station);
+
+      final result = plugin.favoritesWithSnapshots(const []);
+      expect(result, hasLength(1));
+      expect(result.single.id, 'radio:1');
+      expect(result.single.type, TrackType.radio);
+      expect(result.single.title, station.title);
+    });
+
+    test('a local track passed as `track:` never gets a snapshot stored — '
+        'if it later disappears from the library it is silently dropped, '
+        'not resurrected from a snapshot', () async {
+      final plugin = FavoritesPlugin();
+      final a = track('a'); // TrackType.local
+      await plugin.setFavorite('a', true, track: a);
+
+      expect(plugin.favoritesWithSnapshots(const []), isEmpty);
+    });
+
+    test('a live library match takes precedence over a stored snapshot for '
+        'the same id', () async {
+      final plugin = FavoritesPlugin();
+      final station = track('x', type: TrackType.radio);
+      await plugin.setFavorite('x', true, track: station);
+
+      final freshLibraryCopy = BaseTrack(
+        id: 'x',
+        title: 'Updated title',
+        artists: const ['Artist'],
+        album: 'Album',
+        duration: 180,
+        type: TrackType.local,
+      );
+      final result = plugin.favoritesWithSnapshots([freshLibraryCopy]);
+      expect(result.single.title, 'Updated title');
+    });
+
+    test('un-favoriting clears the stored snapshot — re-favoriting the '
+        'same id without passing a track again does not resurrect the '
+        'old snapshot', () async {
+      final plugin = FavoritesPlugin();
+      final station = track('radio:1', type: TrackType.radio);
+      await plugin.setFavorite(station.id, true, track: station);
+      await plugin.setFavorite(station.id, false);
+      await plugin.setFavorite(station.id, true); // no track: this time
+
+      expect(plugin.favoritesWithSnapshots(const []), isEmpty);
+    });
+
+    test('clearAll also wipes stored snapshots, not just the id list',
+        () async {
+      final plugin = FavoritesPlugin();
+      final station = track('radio:1', type: TrackType.radio);
+      await plugin.setFavorite(station.id, true, track: station);
+
+      await plugin.clearAll();
+      await plugin.setFavorite(station.id, true); // no track: this time
+
+      expect(plugin.favoritesWithSnapshots(const []), isEmpty);
+    });
+
+    test('results are ordered by favorite order, mixing local and '
+        'reconstructed-from-snapshot tracks', () async {
+      final plugin = FavoritesPlugin();
+      final local = track('local1');
+      final station = track('radio:1', type: TrackType.radio);
+      await plugin.setFavorite(station.id, true, track: station);
+      await plugin.setFavorite('local1', true, track: local);
+
+      final result = plugin.favoritesWithSnapshots([local]);
+      expect(result.map((t) => t.id), ['radio:1', 'local1']);
+    });
+
+    test('a corrupted snapshot entry is skipped rather than breaking the '
+        'whole list', () async {
+      final plugin = FavoritesPlugin();
+      final good = track('good', type: TrackType.radio);
+      await plugin.setFavorite('good', true, track: good);
+      await plugin.setFavorite('corrupt', true);
+      // Manually corrupt just the 'corrupt' entry's snapshot underneath
+      // the plugin, simulating a malformed/partial write.
+      await plugin.storage.setString(
+        'favorite_track_snapshots',
+        jsonEncode({
+          'good': good.toJson(),
+          'corrupt': {'title': 'no id or type'},
+        }),
+      );
+
+      final result = plugin.favoritesWithSnapshots(const []);
+      expect(result.map((t) => t.id), ['good']);
+    });
+
+    test('a fresh instance reconstructs snapshots after a cold-storage '
+        'warm-up, same as the id list does', () async {
+      final plugin = FavoritesPlugin();
+      final station = track('radio:1', type: TrackType.radio);
+      await plugin.setFavorite(station.id, true, track: station);
+
+      final fresh = FavoritesPlugin();
+      await fresh.storage.initialize();
+      final result = fresh.favoritesWithSnapshots(const []);
+      expect(result.map((t) => t.id), ['radio:1']);
+    });
   });
 }
