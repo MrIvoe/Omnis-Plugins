@@ -51,6 +51,16 @@ class _FakeRatings implements IRatingsProvider {
   int ratingOf(String trackId) => ratings[trackId] ?? 0;
 }
 
+class _FakeFavorites implements IFavoritesProvider {
+  List<String> ids = [];
+
+  @override
+  bool isFavorite(String trackId) => ids.contains(trackId);
+
+  @override
+  List<String> favoriteIds() => ids;
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -134,15 +144,17 @@ void main() {
   });
 
   group('buildQueueFor dispatch', () {
-    test('"Forgotten Favorites"/"Rediscover" bypass BPM/genre matching '
-        'entirely — an empty history/ratings setup returns empty even for '
-        'a track that would satisfy every BPM/genre preset', () {
+    test('"Forgotten Favorites"/"Rediscover"/"Favorites Mix" bypass BPM/'
+        'genre matching entirely — an empty history/ratings/favorites '
+        'setup returns empty even for a track that would satisfy every '
+        'BPM/genre preset', () {
       final plugin = QueuePresetPlugin();
       final ctx = _FakeContext();
       plugin.attach(ctx);
       final tracks = [track(id: 't1', genres: const ['metal'], bpm: 130)];
       expect(plugin.buildQueueFor(tracks, 'Forgotten Favorites'), isEmpty);
       expect(plugin.buildQueueFor(tracks, 'Rediscover'), isEmpty);
+      expect(plugin.buildQueueFor(tracks, 'Favorites Mix'), isEmpty);
     });
 
     test('any other query name goes through the BPM/genre matcher', () {
@@ -152,7 +164,7 @@ void main() {
       expect(result, [matching]);
     });
 
-    test('supportedQueries lists exactly the six presets, in order', () {
+    test('supportedQueries lists exactly the seven presets, in order', () {
       final plugin = QueuePresetPlugin();
       expect(plugin.supportedQueries, [
         'Chill',
@@ -161,7 +173,77 @@ void main() {
         'Sleep',
         'Forgotten Favorites',
         'Rediscover',
+        'Favorites Mix',
       ]);
+    });
+  });
+
+  group('Favorites Mix', () {
+    test('no IFavoritesProvider registered: empty, no crash', () {
+      final plugin = QueuePresetPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+      expect(plugin.buildQueueFor([track(id: 't1')], 'Favorites Mix'), isEmpty);
+    });
+
+    test('favorites provider with nothing favorited: empty', () {
+      final plugin = QueuePresetPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+      ctx.servicesRegistry.register(IFavoritesProvider, _FakeFavorites());
+      expect(plugin.buildQueueFor([track(id: 't1')], 'Favorites Mix'), isEmpty);
+    });
+
+    test('a favorited track missing from the current library (deleted/'
+        'never scanned) is skipped rather than producing a broken entry',
+        () {
+      final plugin = QueuePresetPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+      ctx.servicesRegistry
+          .register(IFavoritesProvider, _FakeFavorites()..ids = ['gone']);
+      expect(
+        plugin.buildQueueFor([track(id: 'unrelated')], 'Favorites Mix'),
+        isEmpty,
+      );
+    });
+
+    test('favorited tracks present in the library are surfaced, '
+        'non-favorited tracks are excluded', () {
+      final plugin = QueuePresetPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+      ctx.servicesRegistry.register(
+        IFavoritesProvider,
+        _FakeFavorites()..ids = ['t1', 't2'],
+      );
+      final t1 = track(id: 't1');
+      final t2 = track(id: 't2');
+      final t3 = track(id: 't3');
+      final result = plugin.buildQueueFor([t1, t2, t3], 'Favorites Mix');
+      expect(result.toSet(), {t1, t2});
+    });
+
+    test('result never exceeds the default limit of 50', () {
+      final plugin = QueuePresetPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+      final ids = List.generate(80, (i) => 't$i');
+      ctx.servicesRegistry.register(IFavoritesProvider, _FakeFavorites()..ids = ids);
+      final tracks = List.generate(80, (i) => track(id: 't$i'));
+      final result = plugin.buildQueueFor(tracks, 'Favorites Mix');
+      expect(result.length, 50);
+    });
+
+    test('query matching is case-insensitive, same as every other preset '
+        'name here', () {
+      final plugin = QueuePresetPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+      ctx.servicesRegistry
+          .register(IFavoritesProvider, _FakeFavorites()..ids = ['t1']);
+      final t1 = track(id: 't1');
+      expect(plugin.buildQueueFor([t1], 'favorites mix'), [t1]);
     });
   });
 

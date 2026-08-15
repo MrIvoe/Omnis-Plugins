@@ -58,6 +58,7 @@ class QueuePresetPlugin extends MusicPlugin implements IQueueBuilder {
     'Sleep',
     'Forgotten Favorites',
     'Rediscover',
+    'Favorites Mix',
   ];
 
   @override
@@ -208,6 +209,37 @@ class QueuePresetPlugin extends MusicPlugin implements IQueueBuilder {
     return shuffled.take(limit).toList();
   }
 
+  /// "Favorites Mix" — the first preset here built directly from
+  /// [IFavoritesProvider] rather than implicit history/rating signal:
+  /// a shuffled sample of whatever the listener has explicitly
+  /// favorited, resolved against the current [tracks] list by id (a
+  /// favorited track no longer in the library — deleted, or a
+  /// never-scanned station/streaming track — is silently skipped, the
+  /// same "resolve by id, drop what's missing" contract every other
+  /// preset here already has). Closes §39's own named gap: "`FavoritesPlugin`
+  /// data... isn't used by any recommendation."
+  ///
+  /// Deliberately returns an **empty** list rather than [buildQueue]'s
+  /// whole-library shuffle fallback when there's no favorites data —
+  /// "Favorites Mix" is a claim about *this listener's actual
+  /// favorites*, the same "don't substitute a different, misleading
+  /// claim for the one being asked" stance [_buildForgottenFavorites]/
+  /// [_buildRediscover] already take for missing history/ratings data.
+  List<BaseTrack> _buildFavoritesMix(
+    List<BaseTrack> tracks, {
+    int limit = 50,
+    Random? random,
+  }) {
+    final favorites = context?.services.get<IFavoritesProvider>();
+    if (favorites == null) return const [];
+    final ids = favorites.favoriteIds().toSet();
+    if (ids.isEmpty) return const [];
+    final matches = tracks.where((t) => ids.contains(t.id)).toList();
+    if (matches.isEmpty) return const [];
+    final shuffled = List<BaseTrack>.from(matches)..shuffle(random);
+    return shuffled.take(limit).toList();
+  }
+
   @override
   List<BaseTrack> buildQueueFor(List<BaseTrack> tracks, String query) {
     final normalized = query.toLowerCase();
@@ -216,6 +248,9 @@ class QueuePresetPlugin extends MusicPlugin implements IQueueBuilder {
     }
     if (normalized == 'rediscover') {
       return _buildRediscover(tracks);
+    }
+    if (normalized == 'favorites mix') {
+      return _buildFavoritesMix(tracks);
     }
     return buildQueue(tracks, query);
   }

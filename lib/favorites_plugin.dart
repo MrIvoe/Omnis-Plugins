@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:omnis_plugin_api/base_track.dart';
 import 'package:omnis_plugin_api/events.dart';
 import 'package:omnis_plugin_api/plugin_interface.dart';
+import 'package:omnis_plugin_api/service_interfaces.dart';
 
 /// "Like"/"Top rated" -- a track can be marked a favorite, the same basic
 /// feature every named competitor has under one name or another (Spotify's
@@ -14,7 +15,7 @@ import 'package:omnis_plugin_api/plugin_interface.dart';
 /// reason to live anywhere else, and `storage` (unlike `context`) works
 /// even before this plugin is attached to a `PluginManager`, which is
 /// what keeps it usable standalone in tests.
-class FavoritesPlugin extends MusicPlugin {
+class FavoritesPlugin extends MusicPlugin implements IFavoritesProvider {
   static const _favoriteTrackIdsKey = 'favorite_track_ids';
 
   /// A snapshot store keyed by track id, same shape/purpose as
@@ -54,7 +55,12 @@ class FavoritesPlugin extends MusicPlugin {
   Future<void> _persistSnapshots(Map<String, dynamic> snapshots) =>
       storage.setString(_snapshotsKey, jsonEncode(snapshots));
 
+  @override
   bool isFavorite(String trackId) => _storedIds.contains(trackId);
+
+  @override
+  List<String> favoriteIds() =>
+      storage.getStringList(_favoriteTrackIdsKey) ?? const <String>[];
 
   /// Marks [trackId] favorited/unfavorited. [track], when given, is
   /// captured as a snapshot for later reconstruction by
@@ -171,7 +177,9 @@ class FavoritesPlugin extends MusicPlugin {
   String get author => 'Omnis Team';
 
   @override
-  Future<void> initialize() async {}
+  Future<void> initialize() async {
+    context?.services.register(IFavoritesProvider, this);
+  }
 
   @override
   Future<void> onTrackStart(BaseTrack track) async {}
@@ -184,7 +192,19 @@ class FavoritesPlugin extends MusicPlugin {
       locationID == 'plugin_settings' ? _FavoritesSettings(plugin: this) : null;
 
   @override
-  Future<void> dispose() async {}
+  Future<void> enable() async {
+    context?.services.register(IFavoritesProvider, this);
+  }
+
+  @override
+  Future<void> disable() async {
+    context?.services.unregister(IFavoritesProvider, this);
+  }
+
+  @override
+  Future<void> dispose() async {
+    context?.services.unregister(IFavoritesProvider, this);
+  }
 }
 
 /// This plugin's own settings — reached by tapping it in the Plugins

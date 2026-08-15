@@ -2,8 +2,25 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omnis_plugin_api/base_track.dart';
+import 'package:omnis_plugin_api/plugin_context.dart';
+import 'package:omnis_plugin_api/service_interfaces.dart';
+import 'package:omnis_plugin_api/service_registry.dart';
 import 'package:omnis_plugins/favorites_plugin.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+/// Only `services` is stubbed — the only context member this plugin's
+/// lifecycle touches, same "stub only what's used" shape
+/// `replay_gain_plugin_test.dart`'s `_FakeContext` already establishes.
+class _FakeContext implements PluginContext {
+  final ServiceRegistry servicesRegistry = ServiceRegistry();
+
+  @override
+  ServiceRegistry get services => servicesRegistry;
+
+  @override
+  noSuchMethod(Invocation invocation) =>
+      throw UnsupportedError('${invocation.memberName} not stubbed');
+}
 
 /// Storage-only behavior — no `PluginContext` needed. `FavoritesPlugin`
 /// keeps its state in its own `PluginStorage`, which works even on a
@@ -209,6 +226,65 @@ void main() {
       await fresh.storage.initialize();
       final result = fresh.favoritesWithSnapshots(const []);
       expect(result.map((t) => t.id), ['radio:1']);
+    });
+  });
+
+  group('IFavoritesProvider', () {
+    test('favoriteIds returns ids in favorited order, empty when nothing '
+        'is favorited', () async {
+      final plugin = FavoritesPlugin();
+      expect(plugin.favoriteIds(), isEmpty);
+
+      await plugin.setFavorite('b', true);
+      await plugin.setFavorite('a', true);
+      expect(plugin.favoriteIds(), ['b', 'a']);
+    });
+
+    test('favoriteIds drops an id once un-favorited', () async {
+      final plugin = FavoritesPlugin();
+      await plugin.setFavorite('a', true);
+      await plugin.setFavorite('b', true);
+      await plugin.setFavorite('a', false);
+      expect(plugin.favoriteIds(), ['b']);
+    });
+
+    test('initialize registers IFavoritesProvider; dispose unregisters it',
+        () async {
+      final plugin = FavoritesPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+
+      expect(ctx.servicesRegistry.has<IFavoritesProvider>(), isFalse);
+      await plugin.initialize();
+      expect(ctx.servicesRegistry.has<IFavoritesProvider>(), isTrue);
+      expect(ctx.servicesRegistry.get<IFavoritesProvider>(), same(plugin));
+
+      await plugin.dispose();
+      expect(ctx.servicesRegistry.has<IFavoritesProvider>(), isFalse);
+    });
+
+    test('disable unregisters; enable re-registers', () async {
+      final plugin = FavoritesPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+
+      await plugin.enable();
+      expect(ctx.servicesRegistry.has<IFavoritesProvider>(), isTrue);
+
+      await plugin.disable();
+      expect(ctx.servicesRegistry.has<IFavoritesProvider>(), isFalse);
+
+      await plugin.enable();
+      expect(ctx.servicesRegistry.has<IFavoritesProvider>(), isTrue);
+    });
+
+    test('initialize/enable/disable/dispose are no-ops without an '
+        'attached context', () async {
+      final plugin = FavoritesPlugin();
+      await plugin.initialize();
+      await plugin.enable();
+      await plugin.disable();
+      await plugin.dispose();
     });
   });
 }
