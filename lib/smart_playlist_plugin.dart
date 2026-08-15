@@ -196,6 +196,14 @@ class _SmartPlaylistSettingsState extends State<_SmartPlaylistSettings> {
   bool _buildingRule = false;
   String? _playFeedback;
 
+  /// The id of the rule currently being edited, or `null` when the form
+  /// is building a brand-new rule. Reusing the *same* id on save is what
+  /// turns `_saveRule` into an in-place update — `SmartPlaylistPlugin
+  /// .saveRule` already replaces-by-id, so editing needed no new
+  /// plugin-level method at all, just the UI remembering which rule (if
+  /// any) it's currently populated from.
+  String? _editingRuleId;
+
   @override
   void dispose() {
     _controller.dispose();
@@ -254,26 +262,75 @@ class _SmartPlaylistSettingsState extends State<_SmartPlaylistSettings> {
         .toList();
     if (conditions.isEmpty) return;
     await widget.plugin.saveRule(SmartPlaylistRule(
-      id: DateTime.now().microsecondsSinceEpoch.toString(),
+      // Reusing the id being edited makes this an in-place update
+      // (SmartPlaylistPlugin.saveRule replaces-by-id); a fresh
+      // timestamp id when not editing makes it a genuinely new rule.
+      id: _editingRuleId ?? DateTime.now().microsecondsSinceEpoch.toString(),
       name: name,
       matchType: _matchType,
       conditions: conditions,
     ));
-    _ruleNameController.clear();
     for (final c in _editableConditions) {
       c.valueController.dispose();
     }
-    if (!mounted) return;
+    _resetForm();
+  }
+
+  /// Populates the form from [rule] instead of a blank state, and marks
+  /// it as an edit-in-place rather than a new rule — the exact form the
+  /// rule was originally built from is what a user expects to see again,
+  /// not an empty one they'd need to reconstruct by hand just to change
+  /// one condition.
+  void _editRule(SmartPlaylistRule rule) {
+    for (final c in _editableConditions) {
+      c.valueController.dispose();
+    }
     setState(() {
-      _matchType = RuleMatchType.all;
+      _editingRuleId = rule.id;
+      _ruleNameController.text = rule.name;
+      _matchType = rule.matchType;
       _editableConditions
         ..clear()
-        ..add(_EditableCondition());
+        ..addAll(rule.conditions.map((c) => _EditableCondition()
+          ..field = c.field
+          ..operator = c.operator
+          ..valueController.text = c.value));
+      if (_editableConditions.isEmpty) {
+        _editableConditions.add(_EditableCondition());
+      }
     });
+  }
+
+  void _cancelEdit() {
+    for (final c in _editableConditions) {
+      c.valueController.dispose();
+    }
+    setState(_resetFormState);
+  }
+
+  void _resetForm() {
+    if (!mounted) return;
+    setState(_resetFormState);
+  }
+
+  /// Shared by [_saveRule] (after a successful save) and [_cancelEdit]
+  /// (discarding in-progress changes) — both return the form to the
+  /// same blank, not-editing state. Callers dispose the *old*
+  /// `_editableConditions`' controllers themselves before calling this,
+  /// since [_saveRule] needs them alive slightly longer (to build the
+  /// saved [RuleCondition]s from their text) than [_cancelEdit] does.
+  void _resetFormState() {
+    _editingRuleId = null;
+    _ruleNameController.clear();
+    _matchType = RuleMatchType.all;
+    _editableConditions
+      ..clear()
+      ..add(_EditableCondition());
   }
 
   Future<void> _deleteRule(String ruleId) async {
     await widget.plugin.deleteRule(ruleId);
+    if (ruleId == _editingRuleId) _cancelEdit();
     if (mounted) setState(() {});
   }
 
@@ -384,8 +441,23 @@ class _SmartPlaylistSettingsState extends State<_SmartPlaylistSettings> {
           Text(_playFeedback!, style: Theme.of(context).textTheme.bodySmall),
         ],
         const SizedBox(height: 16),
-        Text('Create a smart playlist',
-            style: Theme.of(context).textTheme.titleSmall),
+        Row(
+          children: [
+            Text(
+              _editingRuleId == null
+                  ? 'Create a smart playlist'
+                  : 'Edit smart playlist',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            if (_editingRuleId != null) ...[
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: _cancelEdit,
+                child: const Text('Cancel'),
+              ),
+            ],
+          ],
+        ),
         const SizedBox(height: 8),
         TextField(
           controller: _ruleNameController,
@@ -424,7 +496,10 @@ class _SmartPlaylistSettingsState extends State<_SmartPlaylistSettings> {
           child: const Text('Add condition'),
         ),
         const SizedBox(height: 8),
-        FilledButton(onPressed: _saveRule, child: const Text('Save')),
+        FilledButton(
+          onPressed: _saveRule,
+          child: Text(_editingRuleId == null ? 'Save' : 'Update'),
+        ),
       ],
     );
   }
@@ -461,6 +536,11 @@ class _SmartPlaylistSettingsState extends State<_SmartPlaylistSettings> {
                 onPressed: _buildingRule ? null : () => _playRule(rule),
                 icon: const Icon(Icons.play_arrow),
                 tooltip: 'Play',
+              ),
+              IconButton(
+                onPressed: () => _editRule(rule),
+                icon: const Icon(Icons.edit_outlined),
+                tooltip: 'Edit',
               ),
               IconButton(
                 onPressed: () => _deleteRule(rule.id),
