@@ -13,6 +13,7 @@ class ReplayGainPlugin extends MusicPlugin {
   static const gainSource = 'replay_gain';
 
   static const _preampDbKey = 'preamp_db';
+  static const _useAlbumGainKey = 'use_album_gain';
 
   double _multiplier = 1.0;
 
@@ -23,6 +24,17 @@ class ReplayGainPlugin extends MusicPlugin {
   /// library that's tagged consistently too quiet/loud without touching
   /// per-track values. 0 by default — no effect unless changed.
   double get preampDb => storage.getDouble(_preampDbKey) ?? 0.0;
+
+  /// Whether to normalize using [ReplayGainValues.albumGain] instead of
+  /// [ReplayGainValues.trackGain] — the standard alternative RG mode
+  /// every real player (foobar2000, MusicBee) offers: track gain
+  /// normalizes every track to the same perceived loudness, album gain
+  /// instead preserves an album's own intentional relative loudness
+  /// across its tracks (a quiet interlude stays quiet next to a loud
+  /// chorus) while still normalizing *between* different albums. `false`
+  /// (track gain) by default, matching this plugin's prior behavior
+  /// exactly for anyone who already had it configured.
+  bool get useAlbumGain => storage.getBool(_useAlbumGainKey) ?? false;
 
   Future<void> setPreampDb(double db) async {
     await storage.setDouble(_preampDbKey, db.clamp(-6.0, 6.0));
@@ -35,10 +47,28 @@ class ReplayGainPlugin extends MusicPlugin {
     }
   }
 
+  Future<void> setUseAlbumGain(bool value) async {
+    await storage.setBool(_useAlbumGainKey, value);
+    // Same "audible immediately, not just on the next track" contract
+    // setPreampDb already has.
+    final track = context?.currentTrack;
+    if (track != null) {
+      setReplayGain(track);
+      await context?.setGain(gainSource, _multiplier);
+    }
+  }
+
   /// Compute the loudness multiplier for [track] from its ReplayGain tags,
-  /// plus [preampDb].
+  /// plus [preampDb]. Prefers [ReplayGainValues.albumGain] over
+  /// [ReplayGainValues.trackGain] when [useAlbumGain] is on, but falls
+  /// back to track gain when a track has no album gain tag at all —
+  /// the same "don't silently no-op, use what's actually available"
+  /// stance this app's other degrade paths already hold, rather than
+  /// leaving a track completely unnormalized just because the specific
+  /// field the user asked for happens to be missing on it.
   void setReplayGain(BaseTrack track) {
-    final gain = track.replayGain?.trackGain;
+    final values = track.replayGain;
+    final gain = useAlbumGain ? (values?.albumGain ?? values?.trackGain) : values?.trackGain;
     final base = (gain != null && gain.isFinite)
         ? (gain >= 0 ? 1.0 : 1.0 + (-gain / 20.0)).clamp(0.5, 1.5)
         : 1.0;
@@ -120,20 +150,39 @@ class _ReplayGainSettingsState extends State<_ReplayGainSettings> {
   @override
   Widget build(BuildContext context) {
     final db = widget.plugin.preampDb;
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      title: const Text('Preamp'),
-      subtitle: Slider(
-        value: db,
-        min: -6,
-        max: 6,
-        divisions: 24,
-        label: '${db >= 0 ? '+' : ''}${db.toStringAsFixed(1)} dB',
-        onChanged: (value) async {
-          await widget.plugin.setPreampDb(value);
-          if (mounted) setState(() {});
-        },
-      ),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Use album gain'),
+          subtitle: const Text(
+              "Preserve an album's own relative loudness across its "
+              "tracks, instead of normalizing every track to the same "
+              'level. Falls back to track gain for a track with no '
+              'album gain tag.'),
+          value: widget.plugin.useAlbumGain,
+          onChanged: (value) async {
+            await widget.plugin.setUseAlbumGain(value);
+            if (mounted) setState(() {});
+          },
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Preamp'),
+          subtitle: Slider(
+            value: db,
+            min: -6,
+            max: 6,
+            divisions: 24,
+            label: '${db >= 0 ? '+' : ''}${db.toStringAsFixed(1)} dB',
+            onChanged: (value) async {
+              await widget.plugin.setPreampDb(value);
+              if (mounted) setState(() {});
+            },
+          ),
+        ),
+      ],
     );
   }
 }
