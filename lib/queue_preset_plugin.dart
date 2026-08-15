@@ -17,6 +17,17 @@ const _forgottenFavoritesCandidatePool = 200;
 /// something to be reminded of.
 const _forgottenFavoritesRecentWindow = 30;
 
+/// The star rating (0-5) at or above which a track counts as "loved" for
+/// the [QueuePresetPlugin.presets] "Rediscover" preset.
+const _rediscoverMinRating = 4;
+
+/// Same "still active listening, not something to surface" window
+/// [_forgottenFavoritesRecentWindow] uses, reused by name here rather
+/// than shared as one constant since the two presets' windows are
+/// conceptually independent even though they start out equal — a future
+/// tuning pass could reasonably want them to diverge.
+const _rediscoverRecentWindow = 30;
+
 /// Curated queue presets built from objective, always-available track data
 /// (genre keywords, BPM) — deliberately independent of `BaseTrack.mood`,
 /// which only ever gets populated by opt-in enrichment/analysis/manual
@@ -46,6 +57,7 @@ class QueuePresetPlugin extends MusicPlugin implements IQueueBuilder {
     'Workout',
     'Sleep',
     'Forgotten Favorites',
+    'Rediscover',
   ];
 
   @override
@@ -152,10 +164,58 @@ class QueuePresetPlugin extends MusicPlugin implements IQueueBuilder {
     return shuffled.take(limit).toList();
   }
 
+  /// "Rediscover" — one of the spec's own named recommendation
+  /// algorithms (§39), and the first preset here to use explicit
+  /// [IRatingsProvider] signal rather than implicit play-count ranking:
+  /// tracks the listener rated [_rediscoverMinRating] stars or higher
+  /// that haven't shown up in their most-recent plays. A genuinely
+  /// different claim from "Forgotten Favorites" above, not a
+  /// near-duplicate — a track can be rated five stars after a single
+  /// listen and then never played much again (never ranking among the
+  /// *most played*, so "Forgotten Favorites" would never surface it),
+  /// while "Rediscover" catches it precisely because it looks at
+  /// explicit preference instead of play frequency.
+  ///
+  /// Requires **both** [IRatingsProvider] and [IPlayHistoryProvider] —
+  /// missing either degrades to an empty list rather than silently
+  /// dropping the half of the claim it can't verify. Without ratings
+  /// there's no "loved" signal to start from at all; without history
+  /// there's no way to tell a track just played moments ago from one
+  /// genuinely gone unheard for a while, and returning every highly
+  /// rated track regardless would misname something the listener just
+  /// played as a "rediscovery" — the same "don't substitute a different,
+  /// misleading claim for the one being asked" stance
+  /// [_buildForgottenFavorites]'s own doc comment already takes.
+  List<BaseTrack> _buildRediscover(
+    List<BaseTrack> tracks, {
+    int limit = 50,
+    Random? random,
+  }) {
+    final ratings = context?.services.get<IRatingsProvider>();
+    final history = context?.services.get<IPlayHistoryProvider>();
+    if (ratings == null || history == null) return const [];
+    final recentIds = history
+        .recentlyPlayed(limit: _rediscoverRecentWindow)
+        .map((r) => r.trackId)
+        .toSet();
+    final candidates = tracks
+        .where((t) =>
+            ratings.ratingOf(t.id) >= _rediscoverMinRating &&
+            !recentIds.contains(t.id))
+        .toList();
+    if (candidates.isEmpty) return const [];
+    final shuffled = List<BaseTrack>.from(candidates)..shuffle(random);
+    return shuffled.take(limit).toList();
+  }
+
   @override
   List<BaseTrack> buildQueueFor(List<BaseTrack> tracks, String query) {
-    if (query.toLowerCase() == 'forgotten favorites') {
+    final normalized = query.toLowerCase();
+    if (normalized == 'forgotten favorites') {
       return _buildForgottenFavorites(tracks);
+    }
+    if (normalized == 'rediscover') {
+      return _buildRediscover(tracks);
     }
     return buildQueue(tracks, query);
   }
