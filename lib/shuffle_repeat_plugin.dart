@@ -141,8 +141,29 @@ class ShuffleRepeatPlugin extends MusicPlugin {
 
     for (var i = 1; i < result.length; i++) {
       if (!_conflicts(result[i - 1], result[i])) continue;
+      var swapped = false;
       for (var j = i + 1; j < result.length; j++) {
         if (!_swapIsSafe(result, i, j)) continue;
+        final tmp = result[i];
+        result[i] = result[j];
+        result[j] = tmp;
+        swapped = true;
+        break;
+      }
+      if (swapped) continue;
+      // A forward-only search can come up empty simply because a
+      // conflict lands near the end of the queue with too few tracks
+      // left after it to try, even when a perfectly safe partner exists
+      // earlier on — found by testing, not by inspection: a real
+      // conflict-rate measurement across many trials stayed stubbornly
+      // above 0% even with generous "obviously safe" buffer tracks
+      // available, which a forward-only search structurally can't reach
+      // once the conflict is past their positions. `j - 1 >= 0` (not
+      // `i - 2`) since `j == i - 1` is `_swapIsSafe`'s own adjacent-pair
+      // case and is checked correctly either way.
+      for (var j = i - 1; j >= 0; j--) {
+        if (j == i - 1) continue;
+        if (!_swapIsSafe(result, j, i)) continue;
         final tmp = result[i];
         result[i] = result[j];
         result[j] = tmp;
@@ -159,10 +180,16 @@ class ShuffleRepeatPlugin extends MusicPlugin {
   /// reintroduce a same-artist pair the round-robin interleave already
   /// eliminated — this is what keeps stage 2 from ever undoing stage 1's
   /// guarantee.
+  ///
+  /// [i] can be `0` (a candidate found by [deClusteredOrder]'s backward
+  /// search, not just its forward one) — every neighbor access here is
+  /// bounds-checked, not just the `i + 1`/`j + 1` ones, since the
+  /// original forward-only caller used to be the only caller and always
+  /// passed `i >= 1`, a guarantee that's no longer true.
   static bool _swapIsSafe(List<BaseTrack> list, int i, int j) {
     final newAtI = list[j];
     final newAtJ = list[i];
-    if (_conflicts(list[i - 1], newAtI)) return false;
+    if (i - 1 >= 0 && _conflicts(list[i - 1], newAtI)) return false;
     if (i + 1 < list.length && i + 1 != j && _conflicts(newAtI, list[i + 1])) {
       return false;
     }
