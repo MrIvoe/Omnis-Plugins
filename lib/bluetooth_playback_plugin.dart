@@ -33,13 +33,63 @@ import 'package:omnis_plugin_api/service_interfaces.dart';
 /// **Verification status**: implemented against `audio_session`'s
 /// documented API; not exercised against a real Bluetooth device
 /// connecting/disconnecting in this environment.
+/// What a Bluetooth connect/disconnect event should do to the active Now
+/// Playing layout, per [bluetoothLayoutActionFor] — kept as a pure,
+/// dependency-free decision separate from the stateful plugin so it's
+/// unit-testable without a real `PluginContext`.
+enum BluetoothLayoutAction {
+  /// Switch to the configured target layout (connecting, not already on it).
+  switchToTarget,
+
+  /// Restore whichever layout was active before switching (disconnecting).
+  restorePrevious,
+
+  /// Do nothing — the feature is off, or there's nothing to change.
+  none,
+}
+
+/// Decides what [BluetoothLayoutAction] a device connect/disconnect
+/// event should trigger. Mirrors `DrivingModePlugin._enterDrivingMode`/
+/// `_exitDrivingMode`'s own "only switch if not already there" guard —
+/// spec's own example ("Bluetooth device connected → Activate Driving
+/// UI") for the connect side, symmetric restore-on-disconnect for the
+/// other.
+BluetoothLayoutAction bluetoothLayoutActionFor({
+  required bool enabled,
+  required bool connected,
+  required String currentLayoutId,
+  required String targetLayoutId,
+}) {
+  if (!enabled) return BluetoothLayoutAction.none;
+  if (connected) {
+    return currentLayoutId == targetLayoutId
+        ? BluetoothLayoutAction.none
+        : BluetoothLayoutAction.switchToTarget;
+  }
+  return BluetoothLayoutAction.restorePrevious;
+}
+
 class BluetoothPlaybackPlugin extends MusicPlugin
     implements IDeviceConnectivityProvider {
   static const _enabledKey = 'enabled';
+  static const _switchLayoutKey = 'switch_layout_on_connect';
+  static const _targetLayoutId = 'car_mode';
 
   StreamSubscription<AudioDevicesChangedEvent>? _devicesSub;
   String? connectedDeviceName;
   String? lastError;
+  String? _previousLayoutId;
+
+  /// Whether connecting a Bluetooth device should switch the active Now
+  /// Playing layout to Car Mode — off by default so an existing user's
+  /// layout doesn't change out from under them the first time this
+  /// ships. Distinct from [enabled] (whether device detection itself
+  /// runs at all): this only controls what happens to the layout once
+  /// detection is already on.
+  bool get switchLayoutOnConnect => storage.getBool(_switchLayoutKey) ?? false;
+
+  Future<void> setSwitchLayoutOnConnect(bool value) =>
+      storage.setBool(_switchLayoutKey, value);
 
   /// Broadcasts [connectedDeviceName] every time it changes (a device
   /// connecting, a different device connecting, or disconnecting to
@@ -85,6 +135,7 @@ class BluetoothPlaybackPlugin extends MusicPlugin
           if (_isBluetoothOutput(device)) {
             connectedDeviceName = device.name;
             _deviceController.add(connectedDeviceName);
+            _applyLayoutAction(connected: true);
             return;
           }
         }
@@ -92,6 +143,7 @@ class BluetoothPlaybackPlugin extends MusicPlugin
           if (_isBluetoothOutput(device) && device.name == connectedDeviceName) {
             connectedDeviceName = null;
             _deviceController.add(null);
+            _applyLayoutAction(connected: false);
           }
         }
       });
@@ -106,6 +158,38 @@ class BluetoothPlaybackPlugin extends MusicPlugin
     if (connectedDeviceName != null) {
       connectedDeviceName = null;
       _deviceController.add(null);
+      _applyLayoutAction(connected: false);
+    }
+  }
+
+  /// Applies whatever [bluetoothLayoutActionFor] decides for a connect/
+  /// disconnect event — the thin `PluginContext` wrapper around that
+  /// pure decision. Remembers the layout active before switching to
+  /// Car Mode so disconnecting restores it, the same
+  /// `_previousLayoutId` shape `DrivingModePlugin` already uses.
+  void _applyLayoutAction({required bool connected}) {
+    final ctx = context;
+    if (ctx == null) return;
+    final action = bluetoothLayoutActionFor(
+      enabled: switchLayoutOnConnect,
+      connected: connected,
+      currentLayoutId: ctx.playerLayoutId,
+      targetLayoutId: _targetLayoutId,
+    );
+    switch (action) {
+      case BluetoothLayoutAction.switchToTarget:
+        _previousLayoutId = ctx.playerLayoutId;
+        // ignore: unawaited_futures
+        ctx.setPlayerLayoutId(_targetLayoutId);
+      case BluetoothLayoutAction.restorePrevious:
+        final previous = _previousLayoutId;
+        _previousLayoutId = null;
+        if (previous != null && ctx.playerLayoutId == _targetLayoutId) {
+          // ignore: unawaited_futures
+          ctx.setPlayerLayoutId(previous);
+        }
+      case BluetoothLayoutAction.none:
+        break;
     }
   }
 
@@ -322,6 +406,19 @@ class _BluetoothPlaybackSettingsState
           value: plugin.enabled,
           onChanged: (value) async {
             await plugin.setEnabled(value);
+            if (mounted) setState(() {});
+          },
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Switch to Car Mode when connected'),
+          subtitle: const Text(
+              'Activates the Car Mode Now Playing layout while a Bluetooth '
+              'device is connected, restoring your previous layout on '
+              'disconnect'),
+          value: plugin.switchLayoutOnConnect,
+          onChanged: (value) async {
+            await plugin.setSwitchLayoutOnConnect(value);
             if (mounted) setState(() {});
           },
         ),

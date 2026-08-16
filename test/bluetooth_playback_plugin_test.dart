@@ -75,4 +75,77 @@ void main() {
     final plugin = BluetoothPlaybackPlugin();
     expect(await plugin.availablePlaylists(), isEmpty);
   });
+
+  test('switchLayoutOnConnect defaults to false and persists when set',
+      () async {
+    final plugin = BluetoothPlaybackPlugin();
+    expect(plugin.switchLayoutOnConnect, isFalse);
+
+    await plugin.setSwitchLayoutOnConnect(true);
+    expect(plugin.switchLayoutOnConnect, isTrue);
+
+    final fresh = BluetoothPlaybackPlugin();
+    await fresh.storage.initialize();
+    expect(fresh.switchLayoutOnConnect, isTrue);
+  });
+
+  group('bluetoothLayoutActionFor', () {
+    test('does nothing when the feature is disabled, connected or not', () {
+      expect(
+        bluetoothLayoutActionFor(
+          enabled: false,
+          connected: true,
+          currentLayoutId: 'standard',
+          targetLayoutId: 'car_mode',
+        ),
+        BluetoothLayoutAction.none,
+      );
+      expect(
+        bluetoothLayoutActionFor(
+          enabled: false,
+          connected: false,
+          currentLayoutId: 'car_mode',
+          targetLayoutId: 'car_mode',
+        ),
+        BluetoothLayoutAction.none,
+      );
+    });
+
+    test('switches to the target layout on connect when not already on it',
+        () {
+      expect(
+        bluetoothLayoutActionFor(
+          enabled: true,
+          connected: true,
+          currentLayoutId: 'standard',
+          targetLayoutId: 'car_mode',
+        ),
+        BluetoothLayoutAction.switchToTarget,
+      );
+    });
+
+    test('does nothing on connect if already on the target layout', () {
+      expect(
+        bluetoothLayoutActionFor(
+          enabled: true,
+          connected: true,
+          currentLayoutId: 'car_mode',
+          targetLayoutId: 'car_mode',
+        ),
+        BluetoothLayoutAction.none,
+      );
+    });
+
+    test('restores the previous layout on disconnect', () {
+      expect(
+        bluetoothLayoutActionFor(
+          enabled: true,
+          connected: false,
+          currentLayoutId: 'car_mode',
+          targetLayoutId: 'car_mode',
+        ),
+        BluetoothLayoutAction.restorePrevious,
+      );
+    });
+  });
 }
