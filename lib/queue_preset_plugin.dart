@@ -28,6 +28,14 @@ const _rediscoverMinRating = 4;
 /// tuning pass could reasonably want them to diverge.
 const _rediscoverRecentWindow = 30;
 
+/// Fraction of a favorite artist's own tracks, ranked by play count,
+/// excluded as "the hits" for the [QueuePresetPlugin.presets] "Deep
+/// Cuts" preset — the rest are the deep-cut candidates. Computed
+/// per-artist, not library-wide, so a favorite artist with 3 tracks and
+/// one with 30 each get their own proportional cutoff rather than one
+/// competing on the same absolute play-count scale.
+const _deepCutsHitsFraction = 0.3;
+
 /// Curated queue presets built from objective, always-available track data
 /// (genre keywords, BPM) — deliberately independent of `BaseTrack.mood`,
 /// which only ever gets populated by opt-in enrichment/analysis/manual
@@ -59,6 +67,7 @@ class QueuePresetPlugin extends MusicPlugin implements IQueueBuilder {
     'Forgotten Favorites',
     'Rediscover',
     'Favorites Mix',
+    'Deep Cuts',
   ];
 
   @override
@@ -240,6 +249,77 @@ class QueuePresetPlugin extends MusicPlugin implements IQueueBuilder {
     return shuffled.take(limit).toList();
   }
 
+  /// "Deep Cuts" — spec §36's Discovery Engine "Play Something" list,
+  /// and item 39's own remaining named gap after Forgotten Favorites/
+  /// Rediscover/Favorites Mix/Similar Artist closed. The claim: tracks
+  /// by an artist the listener has explicitly favorited, but that
+  /// aren't among *that artist's own* most-played tracks — the "hits"
+  /// you already know, excluded so what's left is the lesser-played
+  /// rest of a catalog you've shown real interest in. Deliberately
+  /// per-artist, not one library-wide play-count cutoff: a favorite
+  /// artist with 3 tracks and one with 30 shouldn't compete on the same
+  /// absolute scale, since "the deep cuts" is inherently a claim about
+  /// one artist's own catalog shape, not the library's.
+  ///
+  /// Requires **both** [IFavoritesProvider] (to know which artists the
+  /// listener actually cares about — without it there's no honest way
+  /// to scope "deep cuts" to anyone in particular) and
+  /// [IPlayHistoryProvider] (to know which of that artist's tracks are
+  /// "the hits" — without it there's nothing to rank by), the same
+  /// missing-either-degrades-to-empty contract [_buildRediscover]'s own
+  /// doc comment already establishes for a two-provider preset. An
+  /// artist whose every track ranks as "a hit" (too few tracks for a
+  /// meaningful split) contributes nothing rather than an arbitrary
+  /// pick — same "don't manufacture a claim the data can't support"
+  /// stance every sibling preset here already takes.
+  List<BaseTrack> _buildDeepCuts(
+    List<BaseTrack> tracks, {
+    int limit = 50,
+    Random? random,
+  }) {
+    final favorites = context?.services.get<IFavoritesProvider>();
+    final history = context?.services.get<IPlayHistoryProvider>();
+    if (favorites == null || history == null) return const [];
+
+    final favoriteIds = favorites.favoriteIds().toSet();
+    if (favoriteIds.isEmpty) return const [];
+
+    final byId = {for (final t in tracks) t.id: t};
+    final favoriteArtists = <String>{};
+    for (final id in favoriteIds) {
+      final track = byId[id];
+      if (track == null) continue;
+      favoriteArtists.addAll(track.artists);
+    }
+    if (favoriteArtists.isEmpty) return const [];
+
+    final byArtist = <String, List<BaseTrack>>{};
+    for (final track in tracks) {
+      for (final artist in track.artists) {
+        if (favoriteArtists.contains(artist)) {
+          byArtist.putIfAbsent(artist, () => []).add(track);
+        }
+      }
+    }
+
+    final seenIds = <String>{};
+    final deepCuts = <BaseTrack>[];
+    for (final artistTracks in byArtist.values) {
+      final ranked = List<BaseTrack>.from(artistTracks)
+        ..sort((a, b) =>
+            history.playCountFor(b.id).compareTo(history.playCountFor(a.id)));
+      final hitsCount =
+          max(1, (ranked.length * _deepCutsHitsFraction).ceil());
+      if (ranked.length <= hitsCount) continue;
+      for (final track in ranked.sublist(hitsCount)) {
+        if (seenIds.add(track.id)) deepCuts.add(track);
+      }
+    }
+    if (deepCuts.isEmpty) return const [];
+    final shuffled = List<BaseTrack>.from(deepCuts)..shuffle(random);
+    return shuffled.take(limit).toList();
+  }
+
   @override
   List<BaseTrack> buildQueueFor(List<BaseTrack> tracks, String query) {
     final normalized = query.toLowerCase();
@@ -251,6 +331,9 @@ class QueuePresetPlugin extends MusicPlugin implements IQueueBuilder {
     }
     if (normalized == 'favorites mix') {
       return _buildFavoritesMix(tracks);
+    }
+    if (normalized == 'deep cuts') {
+      return _buildDeepCuts(tracks);
     }
     return buildQueue(tracks, query);
   }

@@ -72,11 +72,12 @@ void main() {
     required String id,
     List<String> genres = const [],
     double? bpm,
+    List<String> artists = const ['Artist'],
   }) =>
       BaseTrack(
         id: id,
         title: 'Track $id',
-        artists: const ['Artist'],
+        artists: artists,
         album: 'Album',
         duration: 200,
         type: TrackType.local,
@@ -164,7 +165,7 @@ void main() {
       expect(result, [matching]);
     });
 
-    test('supportedQueries lists exactly the seven presets, in order', () {
+    test('supportedQueries lists exactly the eight presets, in order', () {
       final plugin = QueuePresetPlugin();
       expect(plugin.supportedQueries, [
         'Chill',
@@ -174,6 +175,7 @@ void main() {
         'Forgotten Favorites',
         'Rediscover',
         'Favorites Mix',
+        'Deep Cuts',
       ]);
     });
   });
@@ -276,6 +278,198 @@ void main() {
 
       final t1 = track(id: 't1');
       expect(plugin.buildQueueFor([t1], 'Rediscover'), [t1]);
+    });
+  });
+
+  group('Deep Cuts', () {
+    test('no IFavoritesProvider registered: empty, no crash', () {
+      final plugin = QueuePresetPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+      ctx.servicesRegistry.register(IPlayHistoryProvider, _FakeHistory());
+      expect(plugin.buildQueueFor([track(id: 't1')], 'Deep Cuts'), isEmpty);
+    });
+
+    test('no IPlayHistoryProvider registered: empty, no crash', () {
+      final plugin = QueuePresetPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+      ctx.servicesRegistry.register(IFavoritesProvider, _FakeFavorites());
+      expect(plugin.buildQueueFor([track(id: 't1')], 'Deep Cuts'), isEmpty);
+    });
+
+    test('nothing favorited at all: empty', () {
+      final plugin = QueuePresetPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+      ctx.servicesRegistry.register(IFavoritesProvider, _FakeFavorites());
+      ctx.servicesRegistry.register(IPlayHistoryProvider, _FakeHistory());
+      expect(plugin.buildQueueFor([track(id: 't1')], 'Deep Cuts'), isEmpty);
+    });
+
+    test('a favorite artist whose every track ranks as a hit (too few '
+        'tracks for a meaningful split) contributes nothing', () {
+      final plugin = QueuePresetPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+      // Only one track by this artist at all — no "rest of the catalog"
+      // to be a deep cut relative to.
+      final only = track(id: 'only', artists: const ['Solo Artist']);
+      ctx.servicesRegistry
+          .register(IFavoritesProvider, _FakeFavorites()..ids = ['only']);
+      ctx.servicesRegistry.register(
+        IPlayHistoryProvider,
+        _FakeHistory()..mostPlayed = [const MapEntry('only', 100)],
+      );
+      expect(plugin.buildQueueFor([only], 'Deep Cuts'), isEmpty);
+    });
+
+    test('a favorite artist\'s genuinely low-played tracks are surfaced, '
+        'the top-played "hit" is excluded', () {
+      final plugin = QueuePresetPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+      final hit = track(id: 'hit', artists: const ['Fave']);
+      final deepCut1 = track(id: 'deep1', artists: const ['Fave']);
+      final deepCut2 = track(id: 'deep2', artists: const ['Fave']);
+      ctx.servicesRegistry
+          .register(IFavoritesProvider, _FakeFavorites()..ids = ['hit']);
+      ctx.servicesRegistry.register(
+        IPlayHistoryProvider,
+        _FakeHistory()
+          ..mostPlayed = [
+            const MapEntry('hit', 100),
+            const MapEntry('deep1', 2),
+            const MapEntry('deep2', 0),
+          ],
+      );
+      final result =
+          plugin.buildQueueFor([hit, deepCut1, deepCut2], 'Deep Cuts');
+      expect(result.toSet(), {deepCut1, deepCut2});
+      expect(result, isNot(contains(hit)));
+    });
+
+    test('a non-favorite artist\'s low-played tracks are never surfaced, '
+        'even alongside a genuine favorite artist', () {
+      final plugin = QueuePresetPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+      final favHit = track(id: 'fav_hit', artists: const ['Fave']);
+      final favDeepCut = track(id: 'fav_deep', artists: const ['Fave']);
+      final otherHit = track(id: 'other_hit', artists: const ['Other']);
+      final otherDeepCut = track(id: 'other_deep', artists: const ['Other']);
+      ctx.servicesRegistry.register(
+          IFavoritesProvider, _FakeFavorites()..ids = ['fav_hit']);
+      ctx.servicesRegistry.register(
+        IPlayHistoryProvider,
+        _FakeHistory()
+          ..mostPlayed = [
+            const MapEntry('fav_hit', 100),
+            const MapEntry('fav_deep', 1),
+            const MapEntry('other_hit', 100),
+            const MapEntry('other_deep', 1),
+          ],
+      );
+      final result = plugin.buildQueueFor(
+          [favHit, favDeepCut, otherHit, otherDeepCut], 'Deep Cuts');
+      expect(result, [favDeepCut]);
+    });
+
+    test('each favorite artist\'s hit/deep-cut split is computed from '
+        'its own play counts, not one library-wide cutoff', () {
+      final plugin = QueuePresetPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+      // Artist A: a huge hit (1000 plays) and a deep cut (5 plays).
+      final aHit = track(id: 'a_hit', artists: const ['A']);
+      final aDeep = track(id: 'a_deep', artists: const ['A']);
+      // Artist B: a much smaller "hit" (20 plays) that would look like a
+      // deep cut next to Artist A's numbers, and B's own deep cut (1
+      // play) — proving the split is per-artist, not absolute.
+      final bHit = track(id: 'b_hit', artists: const ['B']);
+      final bDeep = track(id: 'b_deep', artists: const ['B']);
+      ctx.servicesRegistry.register(
+        IFavoritesProvider,
+        _FakeFavorites()..ids = ['a_hit', 'b_hit'],
+      );
+      ctx.servicesRegistry.register(
+        IPlayHistoryProvider,
+        _FakeHistory()
+          ..mostPlayed = [
+            const MapEntry('a_hit', 1000),
+            const MapEntry('a_deep', 5),
+            const MapEntry('b_hit', 20),
+            const MapEntry('b_deep', 1),
+          ],
+      );
+      final result =
+          plugin.buildQueueFor([aHit, aDeep, bHit, bDeep], 'Deep Cuts');
+      expect(result.toSet(), {aDeep, bDeep});
+    });
+
+    test('a track by multiple artists, one of them a favorite, is only '
+        'ever counted once', () {
+      final plugin = QueuePresetPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+      final hit = track(id: 'hit', artists: const ['Fave']);
+      final collab =
+          track(id: 'collab', artists: const ['Fave', 'Guest']);
+      ctx.servicesRegistry
+          .register(IFavoritesProvider, _FakeFavorites()..ids = ['hit']);
+      ctx.servicesRegistry.register(
+        IPlayHistoryProvider,
+        _FakeHistory()
+          ..mostPlayed = [
+            const MapEntry('hit', 100),
+            const MapEntry('collab', 1),
+          ],
+      );
+      final result = plugin.buildQueueFor([hit, collab], 'Deep Cuts');
+      expect(result, [collab]);
+    });
+
+    test('result never exceeds the default limit of 50', () {
+      final plugin = QueuePresetPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+      final tracks = [
+        track(id: 'hit', artists: const ['Fave']),
+        ...List.generate(
+            80, (i) => track(id: 'deep$i', artists: const ['Fave'])),
+      ];
+      ctx.servicesRegistry
+          .register(IFavoritesProvider, _FakeFavorites()..ids = ['hit']);
+      ctx.servicesRegistry.register(
+        IPlayHistoryProvider,
+        _FakeHistory()
+          ..mostPlayed = [
+            const MapEntry('hit', 1000),
+            ...List.generate(80, (i) => MapEntry('deep$i', 1)),
+          ],
+      );
+      final result = plugin.buildQueueFor(tracks, 'Deep Cuts');
+      expect(result.length, 50);
+    });
+
+    test('query matching is case-insensitive, same as every other preset '
+        'name here', () {
+      final plugin = QueuePresetPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+      final hit = track(id: 'hit', artists: const ['Fave']);
+      final deep = track(id: 'deep', artists: const ['Fave']);
+      ctx.servicesRegistry
+          .register(IFavoritesProvider, _FakeFavorites()..ids = ['hit']);
+      ctx.servicesRegistry.register(
+        IPlayHistoryProvider,
+        _FakeHistory()
+          ..mostPlayed = [
+            const MapEntry('hit', 100),
+            const MapEntry('deep', 1),
+          ],
+      );
+      expect(plugin.buildQueueFor([hit, deep], 'deep cuts'), [deep]);
     });
   });
 
