@@ -328,6 +328,138 @@ void main() {
       expect(find.text('Thumbed up'), findsNothing);
     });
   });
+
+  group('bpm/duration/bitrate fields (item 42)', () {
+    testWidgets('switching the field dropdown to BPM offers the full '
+        'numeric comparison set, not just contains/=', (tester) async {
+      await pumpSettings(tester);
+
+      await tester.tap(find.byType(DropdownButton<RuleField>));
+      await tester.pumpAndSettle();
+      // BPM sits near the end of the now-longer RuleField list, past
+      // what the open dropdown menu's own popup ListView renders
+      // without help — a direct drag on that ListView (not just an
+      // off-screen scroll, genuinely unbuilt past its cache extent)
+      // brings the rest of the list into the tree.
+      await tester.drag(find.byType(ListView).first, const Offset(0, -300));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('BPM').last);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(DropdownButton<RuleOperator>));
+      await tester.pumpAndSettle();
+
+      expect(find.text('>='), findsWidgets);
+      expect(find.text('<='), findsWidgets);
+      expect(find.text('contains'), findsNothing);
+    });
+
+    testWidgets('saving a BPM condition builds a rule with field: bpm and '
+        'the chosen numeric value', (tester) async {
+      final plugin = await pumpSettings(tester);
+
+      await tester.tap(find.byType(DropdownButton<RuleField>));
+      await tester.pumpAndSettle();
+      // BPM sits near the end of the now-longer RuleField list, past
+      // what the open dropdown menu's own popup ListView renders
+      // without help — a direct drag on that ListView (not just an
+      // off-screen scroll, genuinely unbuilt past its cache extent)
+      // brings the rest of the list into the tree.
+      await tester.drag(find.byType(ListView).first, const Offset(0, -300));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('BPM').last);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(DropdownButton<RuleOperator>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('>=').last);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+          find.widgetWithText(TextField, 'Name'), 'Fast Tracks');
+      await tester.enterText(find.widgetWithText(TextField, 'Value'), '120');
+      await tester.ensureVisible(find.text('Save'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      final saved =
+          plugin.savedRules.firstWhere((r) => r.name == 'Fast Tracks');
+      expect(saved.conditions.single.field, RuleField.bpm);
+      expect(saved.conditions.single.operator, RuleOperator.greaterThanOrEqual);
+      expect(saved.conditions.single.value, '120');
+    });
+  });
+
+  group('codec field (item 42)', () {
+    testWidgets('switching the field dropdown to Format keeps a plain '
+        'text Value field, not a boolean dropdown', (tester) async {
+      await pumpSettings(tester);
+
+      await tester.tap(find.byType(DropdownButton<RuleField>));
+      await tester.pumpAndSettle();
+      // Same "drag the dropdown's own popup ListView before looking"
+      // fix as the BPM group above — Format sits even further down the
+      // now-longer RuleField list.
+      await tester.drag(find.byType(ListView).first, const Offset(0, -300));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Format').last);
+      await tester.pumpAndSettle();
+
+      expect(find.widgetWithText(TextField, 'Value'), findsOneWidget);
+    });
+
+    testWidgets('Format only offers "=" in its operator dropdown, not '
+        '"contains" — a codec label is categorical, not free text',
+        (tester) async {
+      await pumpSettings(tester);
+
+      await tester.tap(find.byType(DropdownButton<RuleField>));
+      await tester.pumpAndSettle();
+      // Same "drag the dropdown's own popup ListView before looking"
+      // fix as the BPM group above — Format sits even further down the
+      // now-longer RuleField list.
+      await tester.drag(find.byType(ListView).first, const Offset(0, -300));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Format').last);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(DropdownButton<RuleOperator>));
+      await tester.pumpAndSettle();
+
+      expect(find.text('='), findsWidgets);
+      expect(find.text('contains'), findsNothing);
+    });
+
+    testWidgets('saving a Format condition builds a rule with field: '
+        'codec, operator: equals, and the entered value', (tester) async {
+      final plugin = await pumpSettings(tester);
+
+      await tester.tap(find.byType(DropdownButton<RuleField>));
+      await tester.pumpAndSettle();
+      // Same "drag the dropdown's own popup ListView before looking"
+      // fix as the BPM group above — Format sits even further down the
+      // now-longer RuleField list.
+      await tester.drag(find.byType(ListView).first, const Offset(0, -300));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Format').last);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+          find.widgetWithText(TextField, 'Name'), 'Lossless Only');
+      await tester.enterText(find.widgetWithText(TextField, 'Value'), 'FLAC');
+      await tester.ensureVisible(find.text('Save'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      final saved =
+          plugin.savedRules.firstWhere((r) => r.name == 'Lossless Only');
+      expect(saved.conditions.single.field, RuleField.codec);
+      expect(saved.conditions.single.operator, RuleOperator.equals);
+      expect(saved.conditions.single.value, 'FLAC');
+    });
+  });
 }
 
 BaseTrack _track({required String id, List<String> artists = const []}) =>

@@ -30,14 +30,36 @@ enum RuleField {
   favorite,
   thumbUp,
   thumbDown,
+
+  /// Beats per minute — reads `BaseTrack.bpm` directly, the same field
+  /// `library_search.dart`'s `bpm:` qualifier already reads with no
+  /// plugin lookup needed.
+  bpm,
+
+  /// Track length in seconds — reads `BaseTrack.duration` directly.
+  duration,
+
+  /// Bitrate in kbps — reads `BaseTrack.bitrateKbps` directly, the same
+  /// field `library_search.dart`'s `bitrate:` qualifier already reads.
+  bitrate,
+
+  /// Codec/format label (e.g. "FLAC", "MP3") — reads `BaseTrack.codec`
+  /// directly, the same field `library_search.dart`'s `format:`
+  /// qualifier already reads. Categorical, not free text — see
+  /// [RuleCondition._matchesCodec].
+  codec,
 }
 
 /// How a condition's [RuleCondition.value] is compared against a
 /// track's field. String fields (`title`/`artist`/`album`/`genre`/
 /// `mood`) support [contains] and [equals] (both case-insensitive, see
-/// [RuleCondition._matchesString]); numeric fields (`year`/`rating`)
-/// support the full comparison set — mirroring exactly which operators
-/// `library_search.dart`'s `year:`/`rating:` qualifiers already support.
+/// [RuleCondition._matchesString]); numeric fields (`year`/`rating`/
+/// `bpm`/`duration`/`bitrate`) support the full comparison set —
+/// mirroring exactly which operators `library_search.dart`'s `year:`/
+/// `rating:`/`bpm:`/`bitrate:` qualifiers already support; `codec` only
+/// ever uses [equals] (categorical, not free text — see
+/// [RuleCondition._matchesCodec]), the same restriction `favorite`/
+/// `thumbUp`/`thumbDown` already have for their own boolean fields.
 enum RuleOperator {
   contains,
   equals,
@@ -104,6 +126,14 @@ class RuleCondition {
       case RuleField.thumbDown:
         if (thumbOf == null) return false;
         return _matchesBoolean(thumbOf(track.id) == ThumbState.down);
+      case RuleField.bpm:
+        return _matchesDouble(track.bpm);
+      case RuleField.duration:
+        return _matchesNumber(track.duration);
+      case RuleField.bitrate:
+        return _matchesNumber(track.bitrateKbps);
+      case RuleField.codec:
+        return _matchesCodec(track.codec);
     }
   }
 
@@ -144,6 +174,36 @@ class RuleCondition {
       RuleOperator.lessThan => trackValue < threshold,
       RuleOperator.contains => false,
     };
+  }
+
+  /// Same shape as [_matchesNumber], for `bpm` — a separate method
+  /// rather than a generic `num` version purely because [double.tryParse]
+  /// and [int.tryParse] are different calls; the comparison logic itself
+  /// is identical.
+  bool _matchesDouble(double? trackValue) {
+    if (trackValue == null) return false;
+    final threshold = double.tryParse(value);
+    if (threshold == null) return false;
+    return switch (operator) {
+      RuleOperator.equals => trackValue == threshold,
+      RuleOperator.greaterThanOrEqual => trackValue >= threshold,
+      RuleOperator.lessThanOrEqual => trackValue <= threshold,
+      RuleOperator.greaterThan => trackValue > threshold,
+      RuleOperator.lessThan => trackValue < threshold,
+      RuleOperator.contains => false,
+    };
+  }
+
+  /// `codec` only ever uses [RuleOperator.equals], exact and case-
+  /// insensitive — the same categorical-not-substring stance
+  /// `library_search.dart`'s `format:` qualifier already takes (a codec
+  /// label like "FLAC"/"MP3" is a discrete value, not free text, so
+  /// `contains` doesn't mean anything for it the way it does for
+  /// title/artist/album/genre/mood).
+  bool _matchesCodec(String? trackValue) {
+    if (trackValue == null) return false;
+    if (operator != RuleOperator.equals) return false;
+    return trackValue.toLowerCase() == value.toLowerCase();
   }
 
   Map<String, dynamic> toJson() => {

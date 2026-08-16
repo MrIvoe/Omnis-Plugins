@@ -233,6 +233,10 @@ class _SmartPlaylistSettingsState extends State<_SmartPlaylistSettings> {
         RuleField.favorite => 'Favorite',
         RuleField.thumbUp => 'Thumbs up',
         RuleField.thumbDown => 'Thumbs down',
+        RuleField.bpm => 'BPM',
+        RuleField.duration => 'Duration (seconds)',
+        RuleField.bitrate => 'Bitrate (kbps)',
+        RuleField.codec => 'Format',
       };
 
   /// String fields support `contains` and `equals` — `RuleCondition
@@ -248,7 +252,11 @@ class _SmartPlaylistSettingsState extends State<_SmartPlaylistSettings> {
   /// boolean field, matching `RuleCondition._matchesBoolean`'s own
   /// contract.
   static List<RuleOperator> _operatorsFor(RuleField field) {
-    if (field == RuleField.year || field == RuleField.rating) {
+    if (field == RuleField.year ||
+        field == RuleField.rating ||
+        field == RuleField.bpm ||
+        field == RuleField.duration ||
+        field == RuleField.bitrate) {
       return const [
         RuleOperator.equals,
         RuleOperator.greaterThanOrEqual,
@@ -259,7 +267,8 @@ class _SmartPlaylistSettingsState extends State<_SmartPlaylistSettings> {
     }
     if (field == RuleField.favorite ||
         field == RuleField.thumbUp ||
-        field == RuleField.thumbDown) {
+        field == RuleField.thumbDown ||
+        field == RuleField.codec) {
       return const [RuleOperator.equals];
     }
     return const [RuleOperator.contains, RuleOperator.equals];

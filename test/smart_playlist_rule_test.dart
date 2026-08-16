@@ -11,17 +11,24 @@ BaseTrack _track({
   List<String> genres = const [],
   String? mood,
   int? year,
+  int duration = 200,
+  double? bpm,
+  int? bitrateKbps,
+  String? codec,
 }) =>
     BaseTrack(
       id: id,
       title: title,
       artists: artists,
       album: album,
-      duration: 200,
+      duration: duration,
       type: TrackType.local,
       genres: genres,
       mood: mood,
       year: year,
+      bpm: bpm,
+      bitrateKbps: bitrateKbps,
+      codec: codec,
     );
 
 void main() {
@@ -182,6 +189,202 @@ void main() {
         value: '1',
       );
       expect(condition.matches(_track(id: 'rated')), isFalse);
+    });
+  });
+
+  group('RuleCondition — bpm field', () {
+    test('equals matches an exact bpm', () {
+      const condition = RuleCondition(
+        field: RuleField.bpm,
+        operator: RuleOperator.equals,
+        value: '120',
+      );
+      expect(condition.matches(_track(id: '1', bpm: 120)), isTrue);
+      expect(condition.matches(_track(id: '2', bpm: 121)), isFalse);
+    });
+
+    test('greaterThanOrEqual/lessThanOrEqual/greaterThan/lessThan all '
+        'compare correctly', () {
+      final track = _track(id: '1', bpm: 120.5);
+      expect(
+        const RuleCondition(
+                field: RuleField.bpm,
+                operator: RuleOperator.greaterThanOrEqual,
+                value: '120.5')
+            .matches(track),
+        isTrue,
+      );
+      expect(
+        const RuleCondition(
+                field: RuleField.bpm,
+                operator: RuleOperator.lessThanOrEqual,
+                value: '120.5')
+            .matches(track),
+        isTrue,
+      );
+      expect(
+        const RuleCondition(
+                field: RuleField.bpm,
+                operator: RuleOperator.greaterThan,
+                value: '120.5')
+            .matches(track),
+        isFalse,
+      );
+      expect(
+        const RuleCondition(
+                field: RuleField.bpm,
+                operator: RuleOperator.lessThan,
+                value: '120.5')
+            .matches(track),
+        isFalse,
+      );
+    });
+
+    test('a track with no bpm never matches', () {
+      const condition = RuleCondition(
+        field: RuleField.bpm,
+        operator: RuleOperator.equals,
+        value: '120',
+      );
+      expect(condition.matches(_track(id: '1')), isFalse);
+    });
+
+    test('an unparseable value matches nothing rather than throwing', () {
+      const condition = RuleCondition(
+        field: RuleField.bpm,
+        operator: RuleOperator.equals,
+        value: 'fast',
+      );
+      expect(condition.matches(_track(id: '1', bpm: 120)), isFalse);
+    });
+
+    test('contains on bpm matches nothing', () {
+      const condition = RuleCondition(
+        field: RuleField.bpm,
+        operator: RuleOperator.contains,
+        value: '120',
+      );
+      expect(condition.matches(_track(id: '1', bpm: 120)), isFalse);
+    });
+  });
+
+  group('RuleCondition — duration field', () {
+    test('equals matches an exact duration in seconds', () {
+      const condition = RuleCondition(
+        field: RuleField.duration,
+        operator: RuleOperator.equals,
+        value: '180',
+      );
+      expect(condition.matches(_track(id: '1', duration: 180)), isTrue);
+      expect(condition.matches(_track(id: '2', duration: 181)), isFalse);
+    });
+
+    test('greaterThan/lessThan compare correctly', () {
+      final track = _track(id: '1', duration: 300);
+      expect(
+        const RuleCondition(
+                field: RuleField.duration,
+                operator: RuleOperator.greaterThan,
+                value: '200')
+            .matches(track),
+        isTrue,
+      );
+      expect(
+        const RuleCondition(
+                field: RuleField.duration,
+                operator: RuleOperator.lessThan,
+                value: '200')
+            .matches(track),
+        isFalse,
+      );
+    });
+
+    test('an unparseable value matches nothing rather than throwing', () {
+      const condition = RuleCondition(
+        field: RuleField.duration,
+        operator: RuleOperator.equals,
+        value: 'long',
+      );
+      expect(condition.matches(_track(id: '1', duration: 180)), isFalse);
+    });
+  });
+
+  group('RuleCondition — bitrate field', () {
+    test('equals matches an exact bitrate', () {
+      const condition = RuleCondition(
+        field: RuleField.bitrate,
+        operator: RuleOperator.equals,
+        value: '320',
+      );
+      expect(condition.matches(_track(id: '1', bitrateKbps: 320)), isTrue);
+      expect(condition.matches(_track(id: '2', bitrateKbps: 128)), isFalse);
+    });
+
+    test('greaterThanOrEqual finds lossless-range tracks', () {
+      const condition = RuleCondition(
+        field: RuleField.bitrate,
+        operator: RuleOperator.greaterThanOrEqual,
+        value: '1000',
+      );
+      expect(condition.matches(_track(id: '1', bitrateKbps: 1411)), isTrue);
+      expect(condition.matches(_track(id: '2', bitrateKbps: 320)), isFalse);
+    });
+
+    test('a track with no bitrate data never matches', () {
+      const condition = RuleCondition(
+        field: RuleField.bitrate,
+        operator: RuleOperator.greaterThanOrEqual,
+        value: '0',
+      );
+      expect(condition.matches(_track(id: '1')), isFalse);
+    });
+
+    test('an unparseable value matches nothing rather than throwing', () {
+      const condition = RuleCondition(
+        field: RuleField.bitrate,
+        operator: RuleOperator.equals,
+        value: 'huge',
+      );
+      expect(condition.matches(_track(id: '1', bitrateKbps: 320)), isFalse);
+    });
+  });
+
+  group('RuleCondition — codec field', () {
+    test('equals matches exactly and case-insensitively', () {
+      const condition = RuleCondition(
+        field: RuleField.codec,
+        operator: RuleOperator.equals,
+        value: 'flac',
+      );
+      expect(condition.matches(_track(id: '1', codec: 'FLAC')), isTrue);
+      expect(condition.matches(_track(id: '2', codec: 'MP3')), isFalse);
+    });
+
+    test('is not a substring match — "mp" must not match "MP3"', () {
+      const condition = RuleCondition(
+        field: RuleField.codec,
+        operator: RuleOperator.equals,
+        value: 'mp',
+      );
+      expect(condition.matches(_track(id: '1', codec: 'MP3')), isFalse);
+    });
+
+    test('a non-equals operator matches nothing rather than throwing', () {
+      const condition = RuleCondition(
+        field: RuleField.codec,
+        operator: RuleOperator.contains,
+        value: 'flac',
+      );
+      expect(condition.matches(_track(id: '1', codec: 'FLAC')), isFalse);
+    });
+
+    test('a track with no codec data never matches', () {
+      const condition = RuleCondition(
+        field: RuleField.codec,
+        operator: RuleOperator.equals,
+        value: 'flac',
+      );
+      expect(condition.matches(_track(id: '1')), isFalse);
     });
   });
 
