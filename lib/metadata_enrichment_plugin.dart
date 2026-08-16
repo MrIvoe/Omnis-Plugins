@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -6,6 +7,7 @@ import 'package:omnis_plugin_api/base_track.dart';
 import 'package:omnis_plugin_api/enrichment_result.dart';
 import 'package:omnis_plugin_api/plugin_interface.dart';
 import 'package:omnis_plugin_api/service_interfaces.dart';
+import 'package:omnis_plugins/cover_art_archive.dart';
 
 /// Curated set of words that read as a mood rather than a genre, used to
 /// pick [EnrichmentResult.mood] out of a Last.fm tag list.
@@ -149,6 +151,27 @@ class MetadataEnrichmentPlugin extends MusicPlugin implements IMetadataProvider 
     );
   }
 
+  /// Looks up cover art for [track] via MusicBrainz (to resolve the
+  /// release MBID) then the Cover Art Archive (to fetch the actual
+  /// image) — item 12/spec §47's "no artwork-provider framework (Cover
+  /// Art Archive/Fanart.tv lookup)" gap. Both are free/keyless, so this
+  /// needs no credential beyond [musicbrainzContact] (used the same way
+  /// [_queryMusicBrainz] already uses it). Returns `null` when the
+  /// track can't be matched, the matched release has no MBID, or the
+  /// archive simply has no art for it (a common, expected outcome, not
+  /// a failure) — never throws.
+  Future<Uint8List?> lookupArtwork(BaseTrack track) async {
+    final artist = track.artists.isNotEmpty ? track.artists.first : '';
+    final title = track.title;
+    if (artist.isEmpty || title.isEmpty) return null;
+
+    final mb = await _queryMusicBrainz(artist, title);
+    final mbid = mb?.releaseMbid;
+    if (mbid == null) return null;
+
+    return CoverArtArchive.fetchFrontCover(_client, mbid);
+  }
+
   Future<_MusicBrainzMatch?> _queryMusicBrainz(
     String artist,
     String title,
@@ -193,9 +216,11 @@ class MetadataEnrichmentPlugin extends MusicPlugin implements IMetadataProvider 
       String? albumArtist;
       ReleaseType? releaseType;
       DateTime? releaseDate;
+      String? releaseMbid;
       if (releases != null && releases.isNotEmpty) {
         final release = releases.first as Map<String, dynamic>;
         album = release['title'] as String?;
+        releaseMbid = release['id'] as String?;
         final date = release['date'] as String?;
         if (date != null && date.length >= 4) {
           year = int.tryParse(date.substring(0, 4));
@@ -225,6 +250,7 @@ class MetadataEnrichmentPlugin extends MusicPlugin implements IMetadataProvider 
         albumArtist: albumArtist,
         releaseType: releaseType,
         releaseDate: releaseDate,
+        releaseMbid: releaseMbid,
       );
     } catch (e) {
       return null;
@@ -355,6 +381,12 @@ class _MusicBrainzMatch {
   final ReleaseType? releaseType;
   final DateTime? releaseDate;
 
+  /// The matched release's own MusicBrainz id (distinct from the
+  /// *recording*'s id) — Cover Art Archive keys artwork by release, not
+  /// recording, so this is what [MetadataEnrichmentPlugin.lookupArtwork]
+  /// needs. `null` when no release matched at all.
+  final String? releaseMbid;
+
   const _MusicBrainzMatch({
     this.title,
     this.artist,
@@ -363,6 +395,7 @@ class _MusicBrainzMatch {
     this.albumArtist,
     this.releaseType,
     this.releaseDate,
+    this.releaseMbid,
   });
 }
 

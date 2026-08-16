@@ -752,6 +752,106 @@ void main() {
     });
   });
 
+  group('lookupArtwork (item 12, spec §47)', () {
+    test('resolves a release MBID via MusicBrainz then fetches its cover '
+        'from the Cover Art Archive', () async {
+      final imageBytes = [1, 2, 3, 4];
+      final client = MockClient((req) async {
+        if (req.url.host == 'musicbrainz.org') {
+          return http.Response(
+            jsonEncode(mbResponse([
+              mbRecording(releases: [
+                {'id': 'release-mbid-123', 'title': 'The Album'},
+              ]),
+            ])),
+            200,
+          );
+        }
+        if (req.url.host == 'coverartarchive.org') {
+          expect(req.url.path, '/release/release-mbid-123/front');
+          return http.Response.bytes(imageBytes, 200);
+        }
+        throw UnimplementedError('should not be called: ${req.url}');
+      });
+      final plugin = MetadataEnrichmentPlugin(client: client);
+
+      final result = await plugin.lookupArtwork(track());
+
+      expect(result, imageBytes);
+    });
+
+    test('returns null when no MusicBrainz release matches at all',
+        () async {
+      final client = MockClient((req) async {
+        if (req.url.host == 'musicbrainz.org') {
+          return http.Response(jsonEncode(mbResponse(const [])), 200);
+        }
+        throw UnimplementedError('should not be called: ${req.url}');
+      });
+      final plugin = MetadataEnrichmentPlugin(client: client);
+
+      final result = await plugin.lookupArtwork(track());
+
+      expect(result, isNull);
+    });
+
+    test('returns null when the matched release has no MBID, without '
+        'ever calling the Cover Art Archive', () async {
+      final client = MockClient((req) async {
+        if (req.url.host == 'musicbrainz.org') {
+          return http.Response(
+            jsonEncode(mbResponse([
+              mbRecording(releases: [
+                {'title': 'The Album'}, // no 'id'
+              ]),
+            ])),
+            200,
+          );
+        }
+        throw UnimplementedError('should not be called: ${req.url}');
+      });
+      final plugin = MetadataEnrichmentPlugin(client: client);
+
+      final result = await plugin.lookupArtwork(track());
+
+      expect(result, isNull);
+    });
+
+    test('returns null when the archive has no art for this release '
+        '(a 404) — an expected outcome, not an error', () async {
+      final client = MockClient((req) async {
+        if (req.url.host == 'musicbrainz.org') {
+          return http.Response(
+            jsonEncode(mbResponse([
+              mbRecording(releases: [
+                {'id': 'release-mbid-123', 'title': 'The Album'},
+              ]),
+            ])),
+            200,
+          );
+        }
+        if (req.url.host == 'coverartarchive.org') {
+          return http.Response('', 404);
+        }
+        throw UnimplementedError('should not be called: ${req.url}');
+      });
+      final plugin = MetadataEnrichmentPlugin(client: client);
+
+      final result = await plugin.lookupArtwork(track());
+
+      expect(result, isNull);
+    });
+
+    test('returns null for a track with no title/artist, without making '
+        'any request at all', () async {
+      final plugin = MetadataEnrichmentPlugin(client: neverCalledClient());
+
+      final result = await plugin.lookupArtwork(track(artists: const []));
+
+      expect(result, isNull);
+    });
+  });
+
   group('description', () {
     test('mentions credential setup when none are configured', () {
       final plugin = MetadataEnrichmentPlugin(client: neverCalledClient());
