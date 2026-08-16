@@ -33,19 +33,37 @@ class RatingsPlugin extends MusicPlugin
   /// representations.
   static const _thumbsKey = 'thumbs_json';
 
-  Map<String, int> _load() {
+  /// Internal storage is `double`, not `int` — MusicBee comparison §36's
+  /// "half stars" gap: a rating like `4.5` needs to be representable at
+  /// all, and a whole-star value is just the degenerate case of the same
+  /// range. A pre-existing on-disk record decodes its value as a JSON
+  /// `int` (`4`, not `4.0`) — accepted here and promoted to `4.0`, so
+  /// every rating ever saved before half-stars existed keeps working
+  /// unchanged. Only exact half-steps (`0.5` increments) are accepted;
+  /// anything else (a stray `4.3`, a corrupted value) is dropped the
+  /// same "one bad entry doesn't break the rest" way an out-of-range
+  /// value already was.
+  Map<String, double> _load() {
     final raw = storage.getString(_ratingsKey);
     if (raw == null || raw.trim().isEmpty) return {};
     try {
       final decoded = jsonDecode(raw);
       if (decoded is! Map) return {};
-      final ratings = <String, int>{};
+      final ratings = <String, double>{};
       for (final entry in decoded.entries) {
         final key = entry.key;
         final value = entry.value;
-        if (key is! String || value is! int) continue;
-        if (value < 1 || value > 5) continue;
-        ratings[key] = value;
+        if (key is! String) continue;
+        double? rating;
+        if (value is int) {
+          rating = value.toDouble();
+        } else if (value is double) {
+          rating = value;
+        } else {
+          continue;
+        }
+        if (!_isValidRating(rating)) continue;
+        ratings[key] = rating;
       }
       return ratings;
     } catch (_) {
@@ -53,7 +71,13 @@ class RatingsPlugin extends MusicPlugin
     }
   }
 
-  Future<void> _persist(Map<String, int> ratings) =>
+  /// `0.5`-`5.0` in exact half-steps (`0` itself is "unrated," never
+  /// stored — same convention [setPreciseRating] already enforces at the
+  /// write path).
+  static bool _isValidRating(double rating) =>
+      rating >= 0.5 && rating <= 5 && (rating * 2) == (rating * 2).roundToDouble();
+
+  Future<void> _persist(Map<String, double> ratings) =>
       storage.setString(_ratingsKey, jsonEncode(ratings));
 
   Map<String, int> _loadThumbs() {
@@ -113,16 +137,39 @@ class RatingsPlugin extends MusicPlugin
     await _persistThumbs(thumbs);
   }
 
-  /// A track's rating, or 0 ("unrated") if it has none.
+  /// A track's rating rounded to the nearest whole star, or 0
+  /// ("unrated") if it has none — the [IRatingsProvider] interface
+  /// contract stays `int` (every existing caller, e.g. `rating:`
+  /// search/smart-playlist conditions, works in whole stars), so a
+  /// half-star value like `4.5` rounds rather than truncating,
+  /// `.round()`'s own standard "round half up" behavior.
   @override
-  int ratingOf(String trackId) => _load()[trackId] ?? 0;
+  int ratingOf(String trackId) => (_load()[trackId] ?? 0).round();
 
-  /// Sets [trackId]'s rating. [rating] must be 0 (clears the rating) to 5
-  /// inclusive — matches the star-picker UI, where tapping the
-  /// already-selected star clears the rating rather than re-setting it.
+  /// A track's exact rating, including a half-star value if it has one —
+  /// `0.0` if unrated. The precise counterpart to [ratingOf]: the
+  /// star-picker UI reads this, not the rounded whole-star value.
+  double preciseRatingOf(String trackId) => _load()[trackId] ?? 0.0;
+
+  /// Sets [trackId]'s rating to a whole number of stars. [rating] must be
+  /// 0 (clears the rating) to 5 inclusive — matches the pre-half-star
+  /// picker convention, kept as-is for any caller that only ever deals
+  /// in whole stars. A thin wrapper over [setPreciseRating].
   Future<void> setRating(String trackId, int rating) async {
     if (rating < 0 || rating > 5) {
       throw ArgumentError.value(rating, 'rating', 'must be 0-5');
+    }
+    await setPreciseRating(trackId, rating.toDouble());
+  }
+
+  /// Sets [trackId]'s rating to an exact value, including a half-star.
+  /// [rating] must be 0 (clears the rating) to 5 inclusive, in exact
+  /// `0.5` steps — the same [_isValidRating] boundary [_load] itself
+  /// enforces when reading stored data back.
+  Future<void> setPreciseRating(String trackId, double rating) async {
+    if (rating != 0 && !_isValidRating(rating)) {
+      throw ArgumentError.value(
+          rating, 'rating', 'must be 0-5 in 0.5 steps');
     }
     final ratings = _load();
     if (rating == 0) {

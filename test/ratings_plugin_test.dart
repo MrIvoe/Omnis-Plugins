@@ -134,6 +134,100 @@ void main() {
     });
   });
 
+  group('half-star ratings (item 15, MusicBee comparison §36)', () {
+    test('preciseRatingOf returns 0.0 for an unrated track', () {
+      final plugin = RatingsPlugin();
+      expect(plugin.preciseRatingOf('t1'), 0.0);
+    });
+
+    test('setPreciseRating persists an exact half-star value', () async {
+      final plugin = RatingsPlugin();
+      await plugin.setPreciseRating('t1', 4.5);
+      expect(plugin.preciseRatingOf('t1'), 4.5);
+    });
+
+    test('setPreciseRating persists across a fresh instance', () async {
+      final plugin = RatingsPlugin();
+      await plugin.setPreciseRating('t1', 3.5);
+
+      final freshInstance = RatingsPlugin();
+      await freshInstance.storage.initialize();
+      expect(freshInstance.preciseRatingOf('t1'), 3.5);
+    });
+
+    test('setPreciseRating rejects a non-half-step value', () async {
+      final plugin = RatingsPlugin();
+      expect(() => plugin.setPreciseRating('t1', 4.3), throwsArgumentError);
+      expect(plugin.preciseRatingOf('t1'), 0.0,
+          reason: 'a rejected call must not partially apply');
+    });
+
+    test('setPreciseRating rejects out-of-range values', () async {
+      final plugin = RatingsPlugin();
+      expect(() => plugin.setPreciseRating('t1', -0.5), throwsArgumentError);
+      expect(() => plugin.setPreciseRating('t1', 5.5), throwsArgumentError);
+      expect(plugin.preciseRatingOf('t1'), 0.0);
+    });
+
+    test('setPreciseRating(trackId, 0) clears the rating', () async {
+      final plugin = RatingsPlugin();
+      await plugin.setPreciseRating('t1', 2.5);
+      await plugin.setPreciseRating('t1', 0);
+      expect(plugin.preciseRatingOf('t1'), 0.0);
+    });
+
+    test('ratingOf rounds a half-star value to the nearest whole star '
+        'for the IRatingsProvider (int) contract', () async {
+      final plugin = RatingsPlugin();
+      await plugin.setPreciseRating('t1', 4.5);
+      expect(plugin.ratingOf('t1'), 5, reason: 'round-half-up');
+
+      await plugin.setPreciseRating('t2', 2.5);
+      expect(plugin.ratingOf('t2'), 3);
+    });
+
+    test('a whole-star rating set via the legacy setRating(int) reads '
+        'back identically through preciseRatingOf', () async {
+      final plugin = RatingsPlugin();
+      await plugin.setRating('t1', 4);
+      expect(plugin.preciseRatingOf('t1'), 4.0);
+      expect(plugin.ratingOf('t1'), 4);
+    });
+
+    test('legacy on-disk data written as a whole JSON int (the shape '
+        'every rating predates half-stars with) still loads correctly '
+        'through both ratingOf and preciseRatingOf', () async {
+      final plugin = RatingsPlugin();
+      await plugin.storage.setString(
+        'ratings_json',
+        jsonEncode({'legacy': 4}),
+      );
+
+      expect(plugin.ratingOf('legacy'), 4);
+      expect(plugin.preciseRatingOf('legacy'), 4.0);
+    });
+
+    test('a stored non-half-step double (corrupted data) is dropped, '
+        'not surfaced as a bogus rating', () async {
+      final plugin = RatingsPlugin();
+      await plugin.storage.setString(
+        'ratings_json',
+        jsonEncode({'good': 4.5, 'bad': 4.3}),
+      );
+
+      expect(plugin.preciseRatingOf('good'), 4.5);
+      expect(plugin.preciseRatingOf('bad'), 0.0);
+    });
+
+    test('setting the exact same precise rating twice is a harmless '
+        'no-op', () async {
+      final plugin = RatingsPlugin();
+      await plugin.setPreciseRating('t1', 3.5);
+      await plugin.setPreciseRating('t1', 3.5);
+      expect(plugin.preciseRatingOf('t1'), 3.5);
+    });
+  });
+
   group('corruption resilience', () {
     test('a single malformed entry among several valid ratings is '
         'skipped, not fatal to the rest', () async {
