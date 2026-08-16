@@ -183,4 +183,135 @@ void main() {
       expect(RatingsPlugin(), isA<IRatingsProvider>());
     });
   });
+
+  group('thumbs up/down (item 36, MusicBee comparison §36)', () {
+    test('a track has ThumbState.none until set', () {
+      final plugin = RatingsPlugin();
+      expect(plugin.thumbOf('t1'), ThumbState.none);
+    });
+
+    test('setThumb persists across a fresh instance', () async {
+      final plugin = RatingsPlugin();
+      await plugin.setThumb('t1', ThumbState.up);
+      expect(plugin.thumbOf('t1'), ThumbState.up);
+
+      final freshInstance = RatingsPlugin();
+      await freshInstance.storage.initialize();
+      expect(freshInstance.thumbOf('t1'), ThumbState.up);
+    });
+
+    test('setThumb(down) overwrites a previous up, and vice versa',
+        () async {
+      final plugin = RatingsPlugin();
+      await plugin.setThumb('t1', ThumbState.up);
+      await plugin.setThumb('t1', ThumbState.down);
+      expect(plugin.thumbOf('t1'), ThumbState.down);
+
+      await plugin.setThumb('t1', ThumbState.up);
+      expect(plugin.thumbOf('t1'), ThumbState.up);
+    });
+
+    test('setThumb(none) clears an existing thumb', () async {
+      final plugin = RatingsPlugin();
+      await plugin.setThumb('t1', ThumbState.up);
+      await plugin.setThumb('t1', ThumbState.none);
+      expect(plugin.thumbOf('t1'), ThumbState.none);
+    });
+
+    test('setting the same state twice is a harmless no-op', () async {
+      final plugin = RatingsPlugin();
+      await plugin.setThumb('t1', ThumbState.down);
+      await plugin.setThumb('t1', ThumbState.down);
+      expect(plugin.thumbOf('t1'), ThumbState.down);
+    });
+
+    test('thumbs and star ratings are independent signals for the same '
+        'track', () async {
+      final plugin = RatingsPlugin();
+      await plugin.setRating('t1', 5);
+      await plugin.setThumb('t1', ThumbState.down);
+
+      expect(plugin.ratingOf('t1'), 5,
+          reason: 'thumbing down must not touch the star rating');
+      expect(plugin.thumbOf('t1'), ThumbState.down);
+    });
+
+    test('thumbs for different tracks do not interfere with each other',
+        () async {
+      final plugin = RatingsPlugin();
+      await plugin.setThumb('a', ThumbState.up);
+      await plugin.setThumb('b', ThumbState.down);
+
+      expect(plugin.thumbOf('a'), ThumbState.up);
+      expect(plugin.thumbOf('b'), ThumbState.down);
+      expect(plugin.thumbOf('c'), ThumbState.none);
+    });
+
+    test('thumbCount reflects the number of thumbed tracks', () async {
+      final plugin = RatingsPlugin();
+      expect(plugin.thumbCount, 0);
+      await plugin.setThumb('a', ThumbState.up);
+      await plugin.setThumb('b', ThumbState.down);
+      expect(plugin.thumbCount, 2);
+    });
+
+    test('clearAll clears both ratings and thumbs', () async {
+      final plugin = RatingsPlugin();
+      await plugin.setRating('a', 3);
+      await plugin.setThumb('a', ThumbState.up);
+      await plugin.setThumb('b', ThumbState.down);
+
+      await plugin.clearAll();
+
+      expect(plugin.count, 0);
+      expect(plugin.thumbCount, 0);
+      expect(plugin.thumbOf('a'), ThumbState.none);
+      expect(plugin.thumbOf('b'), ThumbState.none);
+    });
+
+    group('corruption resilience', () {
+      test('a single malformed entry among several valid thumbs is '
+          'skipped, not fatal to the rest', () async {
+        final plugin = RatingsPlugin();
+        await plugin.storage.setString(
+          'thumbs_json',
+          jsonEncode({
+            'good_up': 1,
+            'bad_string_value': 'not a number',
+            'bad_out_of_range': 9,
+            'good_down': -1,
+          }),
+        );
+
+        expect(plugin.thumbOf('good_up'), ThumbState.up);
+        expect(plugin.thumbOf('good_down'), ThumbState.down);
+        expect(plugin.thumbOf('bad_string_value'), ThumbState.none);
+        expect(plugin.thumbOf('bad_out_of_range'), ThumbState.none);
+      });
+
+      test('completely corrupt JSON degrades to "no thumbs", not a '
+          'crash', () async {
+        final plugin = RatingsPlugin();
+        await plugin.storage
+            .setString('thumbs_json', 'not valid json {{{');
+
+        expect(plugin.thumbOf('t1'), ThumbState.none);
+        expect(plugin.thumbCount, 0);
+      });
+
+      test('a JSON value that is not an object (e.g. a list) degrades '
+          'to "no thumbs"', () async {
+        final plugin = RatingsPlugin();
+        await plugin.storage.setString('thumbs_json', jsonEncode([1, 2, 3]));
+
+        expect(plugin.thumbCount, 0);
+      });
+    });
+
+    test('RatingsPlugin implements IThumbsProvider — reachable by '
+        'another plugin through the capability interface, not just as '
+        'a concrete RatingsPlugin reference.', () {
+      expect(RatingsPlugin(), isA<IThumbsProvider>());
+    });
+  });
 }

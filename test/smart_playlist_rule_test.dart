@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omnis_plugin_api/base_track.dart';
+import 'package:omnis_plugin_api/service_interfaces.dart' show ThumbState;
 import 'package:omnis_plugins/smart_playlist_rule.dart';
 
 BaseTrack _track({
@@ -267,6 +268,94 @@ void main() {
         value: 'true',
       );
       expect(condition.matches(_track(id: 'loved')), isFalse);
+    });
+  });
+
+  group('RuleCondition — thumbUp/thumbDown fields (item 36)', () {
+    ThumbState thumbOf(String id) => switch (id) {
+          'up' => ThumbState.up,
+          'down' => ThumbState.down,
+          _ => ThumbState.none,
+        };
+
+    test('thumbUp equals true matches only thumbed-up tracks', () {
+      const condition = RuleCondition(
+        field: RuleField.thumbUp,
+        operator: RuleOperator.equals,
+        value: 'true',
+      );
+      expect(condition.matches(_track(id: 'up'), thumbOf: thumbOf), isTrue);
+      expect(condition.matches(_track(id: 'down'), thumbOf: thumbOf), isFalse);
+      expect(condition.matches(_track(id: 'none'), thumbOf: thumbOf), isFalse);
+    });
+
+    test('thumbDown equals true matches only thumbed-down tracks', () {
+      const condition = RuleCondition(
+        field: RuleField.thumbDown,
+        operator: RuleOperator.equals,
+        value: 'true',
+      );
+      expect(condition.matches(_track(id: 'down'), thumbOf: thumbOf), isTrue);
+      expect(condition.matches(_track(id: 'up'), thumbOf: thumbOf), isFalse);
+      expect(condition.matches(_track(id: 'none'), thumbOf: thumbOf), isFalse);
+    });
+
+    test('thumbUp equals false matches everything not thumbed up '
+        '(including thumbed down)', () {
+      const condition = RuleCondition(
+        field: RuleField.thumbUp,
+        operator: RuleOperator.equals,
+        value: 'false',
+      );
+      expect(condition.matches(_track(id: 'up'), thumbOf: thumbOf), isFalse);
+      expect(condition.matches(_track(id: 'down'), thumbOf: thumbOf), isTrue);
+      expect(condition.matches(_track(id: 'none'), thumbOf: thumbOf), isTrue);
+    });
+
+    test('a non-equals operator matches nothing rather than throwing', () {
+      const condition = RuleCondition(
+        field: RuleField.thumbUp,
+        operator: RuleOperator.contains,
+        value: 'true',
+      );
+      expect(condition.matches(_track(id: 'up'), thumbOf: thumbOf), isFalse);
+    });
+
+    test('matches nothing when no thumbOf is supplied — same "don\'t '
+        'silently ignore a field the caller didn\'t wire up" stance '
+        'favorite/rating already establish', () {
+      const upCondition = RuleCondition(
+        field: RuleField.thumbUp,
+        operator: RuleOperator.equals,
+        value: 'true',
+      );
+      const downCondition = RuleCondition(
+        field: RuleField.thumbDown,
+        operator: RuleOperator.equals,
+        value: 'true',
+      );
+      expect(upCondition.matches(_track(id: 'up')), isFalse);
+      expect(downCondition.matches(_track(id: 'down')), isFalse);
+    });
+
+    test('thumbUp and thumbDown are independent conditions — a rule can '
+        'combine both in one ALL/ANY/NONE group', () {
+      final rule = SmartPlaylistRule(
+        id: 'r1',
+        name: 'Up not down',
+        matchType: RuleMatchType.none,
+        conditions: const [
+          RuleCondition(
+              field: RuleField.thumbDown,
+              operator: RuleOperator.equals,
+              value: 'true'),
+        ],
+      );
+      final tracks = [_track(id: 'up'), _track(id: 'down'), _track(id: 'none')];
+
+      final result = rule.apply(tracks, thumbOf: thumbOf);
+
+      expect(result.map((t) => t.id).toSet(), {'up', 'none'});
     });
   });
 

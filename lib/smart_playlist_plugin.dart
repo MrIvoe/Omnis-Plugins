@@ -117,10 +117,12 @@ class SmartPlaylistPlugin extends MusicPlugin implements IQueueBuilder {
     if (rule == null) return const [];
     final ratingsProvider = context?.services.get<IRatingsProvider>();
     final favoritesProvider = context?.services.get<IFavoritesProvider>();
+    final thumbsProvider = context?.services.get<IThumbsProvider>();
     return rule.apply(
       tracks,
       ratingOf: ratingsProvider?.ratingOf,
       favoriteOf: favoritesProvider?.isFavorite,
+      thumbOf: thumbsProvider?.thumbOf,
     );
   }
 
@@ -229,6 +231,8 @@ class _SmartPlaylistSettingsState extends State<_SmartPlaylistSettings> {
         RuleField.year => 'Year',
         RuleField.rating => 'Rating',
         RuleField.favorite => 'Favorite',
+        RuleField.thumbUp => 'Thumbs up',
+        RuleField.thumbDown => 'Thumbs down',
       };
 
   /// String fields support `contains` and `equals` — `RuleCondition
@@ -253,9 +257,28 @@ class _SmartPlaylistSettingsState extends State<_SmartPlaylistSettings> {
         RuleOperator.lessThan,
       ];
     }
-    if (field == RuleField.favorite) return const [RuleOperator.equals];
+    if (field == RuleField.favorite ||
+        field == RuleField.thumbUp ||
+        field == RuleField.thumbDown) {
+      return const [RuleOperator.equals];
+    }
     return const [RuleOperator.contains, RuleOperator.equals];
   }
+
+  static bool _isBooleanField(RuleField field) =>
+      field == RuleField.favorite ||
+      field == RuleField.thumbUp ||
+      field == RuleField.thumbDown;
+
+  /// (true-value label, false-value label) for a boolean field's value
+  /// dropdown — field-specific wording ("Favorited"/"Thumbed up") reads
+  /// far better than a generic "True"/"False" for these.
+  static (String, String) _booleanLabels(RuleField field) => switch (field) {
+        RuleField.favorite => ('Favorited', 'Not favorited'),
+        RuleField.thumbUp => ('Thumbed up', 'Not thumbed up'),
+        RuleField.thumbDown => ('Thumbed down', 'Not thumbed down'),
+        _ => ('True', 'False'),
+      };
 
   static String _operatorLabel(RuleOperator op) => switch (op) {
         RuleOperator.contains => 'contains',
@@ -594,9 +617,10 @@ class _SmartPlaylistSettingsState extends State<_SmartPlaylistSettings> {
                 // A boolean field needs a real true/false value, not
                 // whatever free text happened to be left over from a
                 // different field — default it the moment the row
-                // switches into `favorite`, so the dropdown below and
-                // the underlying controller text never disagree.
-                if (value == RuleField.favorite &&
+                // switches into `favorite`/`thumbUp`/`thumbDown`, so the
+                // dropdown below and the underlying controller text
+                // never disagree.
+                if (_isBooleanField(value) &&
                     condition.valueController.text != 'true' &&
                     condition.valueController.text != 'false') {
                   condition.valueController.text = 'true';
@@ -619,16 +643,19 @@ class _SmartPlaylistSettingsState extends State<_SmartPlaylistSettings> {
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: condition.field == RuleField.favorite
+            child: _isBooleanField(condition.field)
                 ? DropdownButton<String>(
                     isExpanded: true,
                     value: condition.valueController.text == 'false'
                         ? 'false'
                         : 'true',
-                    items: const [
-                      DropdownMenuItem(value: 'true', child: Text('Favorited')),
+                    items: [
                       DropdownMenuItem(
-                          value: 'false', child: Text('Not favorited')),
+                          value: 'true',
+                          child: Text(_booleanLabels(condition.field).$1)),
+                      DropdownMenuItem(
+                          value: 'false',
+                          child: Text(_booleanLabels(condition.field).$2)),
                     ],
                     onChanged: (value) {
                       if (value != null) {

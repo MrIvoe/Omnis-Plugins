@@ -19,8 +19,19 @@ import 'package:omnis_plugin_api/service_interfaces.dart';
 /// found and fixed in several of Omnis's own stores (`LibraryStore`,
 /// `PlaylistStore`, `PlayHistoryStore`) this cycle applies just as much
 /// here, so it's built in from the start rather than retrofitted later.
-class RatingsPlugin extends MusicPlugin implements IRatingsProvider {
+class RatingsPlugin extends MusicPlugin
+    implements IRatingsProvider, IThumbsProvider {
   static const _ratingsKey = 'ratings_json';
+
+  /// A track's thumbs-up/down preference — MusicBee comparison §36:
+  /// distinct from the 0-5 star rating above, a coarse "yes/no" signal
+  /// some listeners prefer over picking a specific star count. Stored as
+  /// a second JSON map (trackId -> `1` for up, `-1` for down; absent
+  /// means [ThumbState.none]) rather than folded into the ratings map,
+  /// since a track can be thumbed without ever being star-rated and vice
+  /// versa — these are two independent signals, not one field with two
+  /// representations.
+  static const _thumbsKey = 'thumbs_json';
 
   Map<String, int> _load() {
     final raw = storage.getString(_ratingsKey);
@@ -44,6 +55,63 @@ class RatingsPlugin extends MusicPlugin implements IRatingsProvider {
 
   Future<void> _persist(Map<String, int> ratings) =>
       storage.setString(_ratingsKey, jsonEncode(ratings));
+
+  Map<String, int> _loadThumbs() {
+    final raw = storage.getString(_thumbsKey);
+    if (raw == null || raw.trim().isEmpty) return {};
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return {};
+      final thumbs = <String, int>{};
+      for (final entry in decoded.entries) {
+        final key = entry.key;
+        final value = entry.value;
+        if (key is! String || value is! int) continue;
+        if (value != 1 && value != -1) continue;
+        thumbs[key] = value;
+      }
+      return thumbs;
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<void> _persistThumbs(Map<String, int> thumbs) =>
+      storage.setString(_thumbsKey, jsonEncode(thumbs));
+
+  /// [trackId]'s thumb state, or [ThumbState.none] if it's never been
+  /// thumbed.
+  @override
+  ThumbState thumbOf(String trackId) {
+    switch (_loadThumbs()[trackId]) {
+      case 1:
+        return ThumbState.up;
+      case -1:
+        return ThumbState.down;
+      default:
+        return ThumbState.none;
+    }
+  }
+
+  /// Sets [trackId]'s thumb state. Setting [ThumbState.none] clears it —
+  /// the UI's own toggle behavior (tapping the already-active thumb
+  /// clears it) is expressed by the caller re-passing the current state
+  /// as `none`, the same "tap the already-selected value to clear"
+  /// convention [setRating] already uses for stars.
+  Future<void> setThumb(String trackId, ThumbState state) async {
+    final thumbs = _loadThumbs();
+    switch (state) {
+      case ThumbState.none:
+        if (thumbs.remove(trackId) == null) return;
+      case ThumbState.up:
+        if (thumbs[trackId] == 1) return;
+        thumbs[trackId] = 1;
+      case ThumbState.down:
+        if (thumbs[trackId] == -1) return;
+        thumbs[trackId] = -1;
+    }
+    await _persistThumbs(thumbs);
+  }
 
   /// A track's rating, or 0 ("unrated") if it has none.
   @override
@@ -74,6 +142,9 @@ class RatingsPlugin extends MusicPlugin implements IRatingsProvider {
   /// Total number of rated tracks, for the settings page.
   int get count => _load().length;
 
+  /// Total number of thumbed (up or down) tracks, for the settings page.
+  int get thumbCount => _loadThumbs().length;
+
   /// Every track in [tracks] rated at least [minRating] (1-5) — real
   /// consumers now exist for both cases this was originally written
   /// ahead of: the Omnis app's own `rating:>=4` search qualifier
@@ -87,11 +158,17 @@ class RatingsPlugin extends MusicPlugin implements IRatingsProvider {
     return tracks.where((t) => (ratings[t.id] ?? 0) >= minRating).toList();
   }
 
-  /// Un-rates everything. Used by this plugin's own settings page, which
-  /// confirms before calling it — there's no undo.
+  /// Un-rates everything **and** clears every thumb — used by this
+  /// plugin's own settings page, which confirms before calling it —
+  /// there's no undo. Both signals are wiped together since the
+  /// settings page's own "Clear all" action doesn't distinguish them
+  /// (see [_RatingsSettingsState] — a plain single confirmation, not a
+  /// per-signal choice).
   Future<void> clearAll() async {
-    if (_load().isEmpty) return;
-    await _persist({});
+    final hadRatings = _load().isNotEmpty;
+    final hadThumbs = _loadThumbs().isNotEmpty;
+    if (hadRatings) await _persist({});
+    if (hadThumbs) await _persistThumbs({});
   }
 
   @override
@@ -112,6 +189,7 @@ class RatingsPlugin extends MusicPlugin implements IRatingsProvider {
   @override
   Future<void> initialize() async {
     context?.services.register(IRatingsProvider, this);
+    context?.services.register(IThumbsProvider, this);
   }
 
   @override
@@ -127,24 +205,29 @@ class RatingsPlugin extends MusicPlugin implements IRatingsProvider {
   @override
   Future<void> enable() async {
     context?.services.register(IRatingsProvider, this);
+    context?.services.register(IThumbsProvider, this);
   }
 
   @override
   Future<void> disable() async {
     context?.services.unregister(IRatingsProvider, this);
+    context?.services.unregister(IThumbsProvider, this);
   }
 
   @override
   Future<void> dispose() async {
     context?.services.unregister(IRatingsProvider, this);
+    context?.services.unregister(IThumbsProvider, this);
   }
 }
 
 /// This plugin's own settings — reached by tapping it in the Plugins
-/// list. There's no per-track configuration to speak of (rating is a
-/// star picker, not something with modes), so the one real action here
-/// is a bulk "clear all," with an explicit confirmation since it can't
-/// be undone — same shape as `FavoritesPlugin`'s settings page.
+/// list. There's no per-track configuration to speak of (rating/thumbs
+/// are pickers, not something with modes), so the one real action here
+/// is a bulk "clear all" — wiping both signals together, since they
+/// share one plugin and one confirmation — with an explicit confirmation
+/// since it can't be undone — same shape as `FavoritesPlugin`'s settings
+/// page.
 class _RatingsSettings extends StatefulWidget {
   final RatingsPlugin plugin;
 
@@ -158,24 +241,27 @@ class _RatingsSettingsState extends State<_RatingsSettings> {
   @override
   Widget build(BuildContext context) {
     final count = widget.plugin.count;
+    final thumbCount = widget.plugin.thumbCount;
+    final total = count + thumbCount;
     return Row(
       children: [
         Expanded(
           child: Text(
-            count == 0
-                ? 'No rated tracks.'
-                : '$count rated track${count == 1 ? '' : 's'}.',
+            total == 0
+                ? 'No rated or thumbed tracks.'
+                : '$count rated track${count == 1 ? '' : 's'}, '
+                    '$thumbCount thumbed.',
           ),
         ),
-        if (count > 0)
+        if (total > 0)
           TextButton(
             onPressed: () async {
               final confirmed = await showDialog<bool>(
                 context: context,
                 builder: (context) => AlertDialog(
-                  title: const Text('Clear all ratings?'),
+                  title: const Text('Clear all ratings and thumbs?'),
                   content: Text(
-                      'Removes the rating from all $count tracks. This '
+                      'Removes every star rating and thumbs up/down. This '
                       'cannot be undone.'),
                   actions: [
                     TextButton(

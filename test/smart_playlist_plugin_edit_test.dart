@@ -249,6 +249,85 @@ void main() {
       expect(saved.conditions.single.value, 'false');
     });
   });
+
+  group('thumbUp/thumbDown field (item 36)', () {
+    testWidgets('switching the field dropdown to Thumbs up swaps the '
+        'value text field for a Thumbed up/Not thumbed up dropdown',
+        (tester) async {
+      await pumpSettings(tester);
+
+      await tester.tap(find.byType(DropdownButton<RuleField>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Thumbs up').last);
+      await tester.pumpAndSettle();
+
+      expect(find.widgetWithText(TextField, 'Value'), findsNothing);
+      expect(find.text('Thumbed up'), findsOneWidget);
+    });
+
+    testWidgets('saving a Thumbs up condition (default "Thumbed up") '
+        'builds a rule with field: thumbUp, operator: equals, '
+        'value: "true"', (tester) async {
+      final plugin = await pumpSettings(tester);
+
+      await tester.tap(find.byType(DropdownButton<RuleField>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Thumbs up').last);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+          find.widgetWithText(TextField, 'Name'), 'Liked Tracks');
+      await tester.ensureVisible(find.text('Save'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      final saved =
+          plugin.savedRules.firstWhere((r) => r.name == 'Liked Tracks');
+      expect(saved.conditions.single.field, RuleField.thumbUp);
+      expect(saved.conditions.single.operator, RuleOperator.equals);
+      expect(saved.conditions.single.value, 'true');
+    });
+
+    testWidgets('switching the value dropdown to "Not thumbed up" builds '
+        'a rule with value: "false"', (tester) async {
+      final plugin = await pumpSettings(tester);
+
+      await tester.tap(find.byType(DropdownButton<RuleField>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Thumbs up').last);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(DropdownButton<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Not thumbed up').last);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+          find.widgetWithText(TextField, 'Name'), 'Not Liked');
+      await tester.ensureVisible(find.text('Save'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      final saved =
+          plugin.savedRules.firstWhere((r) => r.name == 'Not Liked');
+      expect(saved.conditions.single.value, 'false');
+    });
+
+    testWidgets('switching to Thumbs down uses its own field-specific '
+        'labels, not "Thumbed up"/"Not thumbed up"', (tester) async {
+      await pumpSettings(tester);
+
+      await tester.tap(find.byType(DropdownButton<RuleField>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Thumbs down').last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Thumbed down'), findsOneWidget);
+      expect(find.text('Thumbed up'), findsNothing);
+    });
+  });
 }
 
 BaseTrack _track({required String id, List<String> artists = const []}) =>

@@ -1,4 +1,5 @@
 import 'package:omnis_plugin_api/base_track.dart';
+import 'package:omnis_plugin_api/service_interfaces.dart' show ThumbState;
 
 /// Null-safe "find the first match, or null" — avoids adding
 /// `package:collection` as a dependency just for `firstOrNull`.
@@ -18,7 +19,18 @@ T? _firstWhereOrNull<T>(Iterable<T> items, bool Function(T) test) {
 /// same kind of thing — "does this track's X satisfy Y" — just reached
 /// through a structured rule-builder UI instead of typed `field:value`
 /// syntax.
-enum RuleField { title, artist, album, genre, mood, year, rating, favorite }
+enum RuleField {
+  title,
+  artist,
+  album,
+  genre,
+  mood,
+  year,
+  rating,
+  favorite,
+  thumbUp,
+  thumbDown,
+}
 
 /// How a condition's [RuleCondition.value] is compared against a
 /// track's field. String fields (`title`/`artist`/`album`/`genre`/
@@ -65,6 +77,7 @@ class RuleCondition {
     BaseTrack track, {
     int Function(String trackId)? ratingOf,
     bool Function(String trackId)? favoriteOf,
+    ThumbState Function(String trackId)? thumbOf,
   }) {
     switch (field) {
       case RuleField.title:
@@ -85,6 +98,12 @@ class RuleCondition {
       case RuleField.favorite:
         if (favoriteOf == null) return false;
         return _matchesBoolean(favoriteOf(track.id));
+      case RuleField.thumbUp:
+        if (thumbOf == null) return false;
+        return _matchesBoolean(thumbOf(track.id) == ThumbState.up);
+      case RuleField.thumbDown:
+        if (thumbOf == null) return false;
+        return _matchesBoolean(thumbOf(track.id) == ThumbState.down);
     }
   }
 
@@ -179,10 +198,11 @@ class SmartPlaylistRule {
     List<BaseTrack> library, {
     int Function(String trackId)? ratingOf,
     bool Function(String trackId)? favoriteOf,
+    ThumbState Function(String trackId)? thumbOf,
   }) {
     if (conditions.isEmpty) return const [];
     return library
-        .where((track) => _matchesTrack(track, ratingOf, favoriteOf))
+        .where((track) => _matchesTrack(track, ratingOf, favoriteOf, thumbOf))
         .toList();
   }
 
@@ -190,17 +210,18 @@ class SmartPlaylistRule {
     BaseTrack track,
     int Function(String)? ratingOf,
     bool Function(String)? favoriteOf,
+    ThumbState Function(String)? thumbOf,
   ) {
     switch (matchType) {
       case RuleMatchType.all:
-        return conditions.every((c) =>
-            c.matches(track, ratingOf: ratingOf, favoriteOf: favoriteOf));
+        return conditions.every((c) => c.matches(track,
+            ratingOf: ratingOf, favoriteOf: favoriteOf, thumbOf: thumbOf));
       case RuleMatchType.any:
-        return conditions.any((c) =>
-            c.matches(track, ratingOf: ratingOf, favoriteOf: favoriteOf));
+        return conditions.any((c) => c.matches(track,
+            ratingOf: ratingOf, favoriteOf: favoriteOf, thumbOf: thumbOf));
       case RuleMatchType.none:
-        return conditions.every((c) =>
-            !c.matches(track, ratingOf: ratingOf, favoriteOf: favoriteOf));
+        return conditions.every((c) => !c.matches(track,
+            ratingOf: ratingOf, favoriteOf: favoriteOf, thumbOf: thumbOf));
     }
   }
 
