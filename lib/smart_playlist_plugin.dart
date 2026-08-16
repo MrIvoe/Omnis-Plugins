@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:omnis_plugin_api/base_track.dart';
 import 'package:omnis_plugin_api/plugin_interface.dart';
 import 'package:omnis_plugin_api/service_interfaces.dart';
@@ -94,6 +95,31 @@ class SmartPlaylistPlugin extends MusicPlugin implements IQueueBuilder {
     final filtered = rules.where((r) => r.id != ruleId).toList();
     if (filtered.length == rules.length) return;
     await _persistRules(filtered);
+  }
+
+  /// Item 42's "no import/export" gap — every currently saved rule as
+  /// one shareable JSON payload. Thin wrapper: the actual serialization
+  /// lives in [exportRulesToJson], kept a pure function in
+  /// `smart_playlist_rule.dart` so it's testable without a plugin
+  /// instance/storage at all.
+  String exportRulesJson() => exportRulesToJson(savedRules);
+
+  /// Decodes [raw] (as produced by [exportRulesJson], though any
+  /// correctly-shaped payload works) and persists whatever rules parsed
+  /// successfully, replacing an existing rule with the same id (an
+  /// import re-applying a previously-exported rule is an update, not a
+  /// duplicate — same by-id semantics [saveRule] already has) or adding
+  /// a new one otherwise. Returns how many rules were actually
+  /// imported, so the caller can report a real count rather than just
+  /// "done." A completely malformed [raw] imports zero rules rather
+  /// than throwing, matching [importRulesFromJson]'s own contract.
+  Future<int> importRulesJson(String raw) async {
+    final incoming = importRulesFromJson(raw);
+    if (incoming.isEmpty) return 0;
+    for (final rule in incoming) {
+      await saveRule(rule);
+    }
+    return incoming.length;
   }
 
   /// Builds a queue from the saved rule with id [ruleId], evaluated
@@ -383,6 +409,94 @@ class _SmartPlaylistSettingsState extends State<_SmartPlaylistSettings> {
     if (mounted) setState(() {});
   }
 
+  /// Item 42's "no import/export" gap, export half — shows every saved
+  /// rule as one JSON payload the user can copy elsewhere (another
+  /// install, a backup note) via the clipboard, deliberately not a
+  /// file save — this package has no `file_picker` dependency, and
+  /// adding one just for this would be a heavier lift than the feature
+  /// needs.
+  Future<void> _exportRules() async {
+    final json = widget.plugin.exportRulesJson();
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Export smart playlists'),
+        content: SizedBox(
+          width: 480,
+          child: SingleChildScrollView(
+            child: SelectableText(json,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Close'),
+          ),
+          FilledButton.icon(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: json));
+              if (dialogContext.mounted) Navigator.pop(dialogContext);
+            },
+            icon: const Icon(Icons.copy, size: 18),
+            label: const Text('Copy to clipboard'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Item 42's "no import/export" gap, import half — a paste box for a
+  /// payload [_exportRules] (or a hand-edited equivalent) produced.
+  /// Malformed/empty input imports nothing, reported honestly rather
+  /// than as a silent success, matching [importRulesJson]'s own "a bad
+  /// paste finds nothing to import, not a crash" contract.
+  Future<void> _importRules() async {
+    final pasteController = TextEditingController();
+    final json = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Import smart playlists'),
+        content: SizedBox(
+          width: 480,
+          child: TextField(
+            controller: pasteController,
+            maxLines: 8,
+            decoration: const InputDecoration(
+              hintText: 'Paste exported smart playlist JSON here',
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, pasteController.text),
+            child: const Text('Import'),
+          ),
+        ],
+      ),
+    );
+    // Deferred one frame rather than disposed immediately: `showDialog`'s
+    // returned Future completes as soon as `Navigator.pop` is called, not
+    // once the route's own exit transition finishes — disposing
+    // synchronously here could race a `TextField`/`InputDecorator` still
+    // mid-animation and still listening to this exact controller.
+    WidgetsBinding.instance.addPostFrameCallback((_) => pasteController.dispose());
+    if (json == null || json.trim().isEmpty || !mounted) return;
+    final imported = await widget.plugin.importRulesJson(json);
+    if (!mounted) return;
+    setState(() {
+      _playFeedback = imported == 0
+          ? 'No valid smart playlists found in that paste.'
+          : 'Imported $imported smart playlist${imported == 1 ? '' : 's'}.';
+    });
+  }
+
   Future<void> _playRule(SmartPlaylistRule rule) async {
     final context = widget.plugin.context;
     if (context == null) return;
@@ -475,7 +589,18 @@ class _SmartPlaylistSettingsState extends State<_SmartPlaylistSettings> {
           ],
         ),
         const Divider(height: 32),
-        Text('Smart playlists', style: Theme.of(context).textTheme.titleSmall),
+        Row(
+          children: [
+            Text('Smart playlists',
+                style: Theme.of(context).textTheme.titleSmall),
+            const Spacer(),
+            TextButton(
+              onPressed: widget.plugin.savedRules.isEmpty ? null : _exportRules,
+              child: const Text('Export'),
+            ),
+            TextButton(onPressed: _importRules, child: const Text('Import')),
+          ],
+        ),
         const SizedBox(height: 4),
         Text(
           'Saved rules with real ALL/ANY/NONE conditions — membership is '

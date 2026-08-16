@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omnis_plugin_api/base_track.dart';
 import 'package:omnis_plugin_api/service_interfaces.dart' show ThumbState;
@@ -788,6 +790,88 @@ void main() {
       final decoded = SmartPlaylistRule.fromJson(json);
       expect(decoded!.conditions, hasLength(1));
       expect(decoded.conditions.single.value, 'ok');
+    });
+  });
+
+  group('exportRulesToJson / importRulesFromJson (item 42, import/export)',
+      () {
+    const rule1 = SmartPlaylistRule(
+      id: '1',
+      name: 'Rock Rules',
+      matchType: RuleMatchType.all,
+      conditions: [
+        RuleCondition(
+            field: RuleField.genre,
+            operator: RuleOperator.equals,
+            value: 'rock'),
+      ],
+    );
+    const rule2 = SmartPlaylistRule(
+      id: '2',
+      name: 'High Energy',
+      matchType: RuleMatchType.any,
+      conditions: [
+        RuleCondition(
+            field: RuleField.bpm,
+            operator: RuleOperator.greaterThanOrEqual,
+            value: '140'),
+      ],
+    );
+
+    test('a real round trip preserves every rule and condition exactly',
+        () {
+      final json = exportRulesToJson([rule1, rule2]);
+      final imported = importRulesFromJson(json);
+
+      expect(imported.map((r) => r.id), ['1', '2']);
+      expect(imported[0].name, 'Rock Rules');
+      expect(imported[0].conditions.single.field, RuleField.genre);
+      expect(imported[1].name, 'High Energy');
+      expect(imported[1].conditions.single.field, RuleField.bpm);
+    });
+
+    test('exporting an empty list produces a payload that imports back '
+        'to an empty list, not a crash', () {
+      final json = exportRulesToJson(const []);
+      expect(importRulesFromJson(json), isEmpty);
+    });
+
+    test('a single malformed rule among several valid ones is skipped, '
+        'not fatal to the rest of the import', () {
+      final json = jsonEncode({
+        'schemaVersion': 1,
+        'rules': [
+          rule1.toJson(),
+          <String, dynamic>{'id': 'bad'}, // missing name/matchType
+          rule2.toJson(),
+        ],
+      });
+      final imported = importRulesFromJson(json);
+      expect(imported.map((r) => r.id), ['1', '2']);
+    });
+
+    test('completely malformed JSON imports an empty list rather than '
+        'throwing', () {
+      expect(() => importRulesFromJson('not valid json {{{'),
+          returnsNormally);
+      expect(importRulesFromJson('not valid json {{{'), isEmpty);
+    });
+
+    test('JSON that is not the expected envelope shape (e.g. a bare '
+        'list, or an object with no "rules" key) imports an empty list',
+        () {
+      expect(importRulesFromJson(jsonEncode([rule1.toJson()])), isEmpty);
+      expect(importRulesFromJson(jsonEncode({'schemaVersion': 1})), isEmpty);
+    });
+
+    test('an exported payload is real, parseable JSON with the expected '
+        'top-level shape', () {
+      final json = exportRulesToJson([rule1]);
+      final decoded = jsonDecode(json);
+      expect(decoded, isA<Map>());
+      expect(decoded['schemaVersion'], isA<int>());
+      expect(decoded['rules'], isA<List>());
+      expect((decoded['rules'] as List).single['id'], '1');
     });
   });
 }

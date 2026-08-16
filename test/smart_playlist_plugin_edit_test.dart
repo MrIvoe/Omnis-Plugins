@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, SystemChannels;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omnis_plugin_api/base_track.dart';
 import 'package:omnis_plugins/smart_playlist_plugin.dart';
@@ -22,8 +23,28 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  // This test environment doesn't wire up a default Clipboard mock the
+  // way it does for other platform channels — a real `Clipboard.setData`/
+  // `getData` call otherwise hangs forever (no real OS clipboard for a
+  // real platform response to come back from) rather than failing fast,
+  // confirmed via a minimal standalone repro before writing this fix.
+  // Only the Export/Import group below actually touches the clipboard;
+  // every other test in this file is unaffected by this handler existing.
+  String? mockClipboardText;
   setUp(() {
     SharedPreferences.setMockInitialValues({});
+    mockClipboardText = null;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') {
+        mockClipboardText = (call.arguments as Map)['text'] as String?;
+        return null;
+      }
+      if (call.method == 'Clipboard.getData') {
+        return {'text': mockClipboardText};
+      }
+      return null;
+    });
   });
 
   Future<SmartPlaylistPlugin> pumpSettings(WidgetTester tester) async {
@@ -458,6 +479,113 @@ void main() {
       expect(saved.conditions.single.field, RuleField.codec);
       expect(saved.conditions.single.operator, RuleOperator.equals);
       expect(saved.conditions.single.value, 'FLAC');
+    });
+  });
+
+  group('import/export (item 42)', () {
+    testWidgets('Export is disabled when there are no saved rules at all',
+        (tester) async {
+      // Deliberately not pumpSettings() — that helper always pre-saves
+      // a "Recent Rock" rule, which is exactly the case this test needs
+      // to NOT be true.
+      final plugin = SmartPlaylistPlugin();
+      final widget = plugin.uiSlot('plugin_settings');
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(body: SingleChildScrollView(child: widget as Widget)),
+      ));
+      await tester.pumpAndSettle();
+
+      final exportButton =
+          tester.widget<TextButton>(find.widgetWithText(TextButton, 'Export'));
+      expect(exportButton.onPressed, isNull);
+    });
+
+    testWidgets('Export shows the saved rule as real JSON, and Copy to '
+        'clipboard puts it on the clipboard', (tester) async {
+      // pumpSettings() pre-saves a real "Recent Rock" rule — used
+      // directly here rather than saving a second one.
+      await pumpSettings(tester);
+
+      await tester.tap(find.widgetWithText(TextButton, 'Export'));
+      await tester.pumpAndSettle();
+
+      // A bare "Recent Rock" substring also matches an unrelated hint
+      // text elsewhere on this same page (the Name field's own
+      // `hintText: 'e.g. "Recent Rock"'`) — this substring is unique to
+      // the exported JSON itself (jsonEncode's compact, no-space
+      // output), so it can only match the dialog's own content.
+      expect(find.textContaining('"name":"Recent Rock"'), findsOneWidget);
+
+      await tester.tap(find.text('Copy to clipboard'));
+      await tester.pumpAndSettle();
+
+      final clipboard = await Clipboard.getData(Clipboard.kTextPlain);
+      expect(clipboard?.text, contains('Recent Rock'));
+      expect(clipboard?.text, contains('"schemaVersion"'));
+    });
+
+    testWidgets('Import parses pasted JSON, saves the rule, and reports '
+        'how many were imported', (tester) async {
+      final plugin = await pumpSettings(tester);
+      final payload = exportRulesToJson(const [
+        SmartPlaylistRule(
+          id: 'imported-1',
+          name: 'Imported Rule',
+          matchType: RuleMatchType.all,
+          conditions: [
+            RuleCondition(
+                field: RuleField.artist,
+                operator: RuleOperator.contains,
+                value: 'Queen'),
+          ],
+        ),
+      ]);
+
+      await tester.tap(find.widgetWithText(TextButton, 'Import'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).last, payload);
+      await tester.tap(find.text('Import').last);
+      await tester.pumpAndSettle();
+
+      // pumpSettings() itself already saved "existing-rule" — the
+      // import adds a second, it doesn't replace the pre-existing one.
+      expect(plugin.savedRules.map((r) => r.id).toSet(),
+          {'existing-rule', 'imported-1'});
+      expect(find.textContaining('Imported 1 smart playlist'), findsOneWidget);
+    });
+
+    testWidgets('Import with malformed input reports zero imported and '
+        'saves nothing', (tester) async {
+      final plugin = await pumpSettings(tester);
+
+      await tester.tap(find.widgetWithText(TextButton, 'Import'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+          find.byType(TextField).last, 'not valid json {{{');
+      await tester.tap(find.text('Import').last);
+      await tester.pumpAndSettle();
+
+      // pumpSettings() itself already saved "existing-rule" — a failed
+      // import must leave it untouched, not wipe it.
+      expect(plugin.savedRules.map((r) => r.id), ['existing-rule']);
+      expect(find.textContaining('No valid smart playlists found'),
+          findsOneWidget);
+    });
+
+    testWidgets('Cancelling the Import dialog imports nothing', (tester) async {
+      final plugin = await pumpSettings(tester);
+      final payload = exportRulesToJson(
+          const [SmartPlaylistRule(id: '1', name: 'X', matchType: RuleMatchType.all, conditions: [])]);
+
+      await tester.tap(find.widgetWithText(TextButton, 'Import'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).last, payload);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+
+      // pumpSettings() itself already saved "existing-rule" — Cancel
+      // must leave it untouched, not wipe it.
+      expect(plugin.savedRules.map((r) => r.id), ['existing-rule']);
     });
   });
 }

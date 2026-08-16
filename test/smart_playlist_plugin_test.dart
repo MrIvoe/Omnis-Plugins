@@ -144,4 +144,64 @@ void main() {
       expect(plugin.buildQueueForRule([track('a')], '1'), isEmpty);
     });
   });
+
+  group('exportRulesJson / importRulesJson (item 42, import/export)', () {
+    test('exportRulesJson exports exactly the currently saved rules', () async {
+      final plugin = SmartPlaylistPlugin();
+      await plugin.saveRule(rule('1'));
+      await plugin.saveRule(rule('2'));
+
+      final json = plugin.exportRulesJson();
+      final decoded = importRulesFromJson(json);
+      expect(decoded.map((r) => r.id).toSet(), {'1', '2'});
+    });
+
+    test('importRulesJson adds new rules and returns the count actually '
+        'imported', () async {
+      final plugin = SmartPlaylistPlugin();
+      final json = exportRulesToJson([rule('a'), rule('b')]);
+
+      final imported = await plugin.importRulesJson(json);
+
+      expect(imported, 2);
+      expect(plugin.savedRules.map((r) => r.id).toSet(), {'a', 'b'});
+    });
+
+    test('importRulesJson replaces an existing rule with the same id '
+        'rather than duplicating it', () async {
+      final plugin = SmartPlaylistPlugin();
+      await plugin.saveRule(rule('1'));
+      final updated = SmartPlaylistRule(
+        id: '1',
+        name: 'Updated Name',
+        matchType: RuleMatchType.any,
+        conditions: const [],
+      );
+
+      await plugin.importRulesJson(exportRulesToJson([updated]));
+
+      expect(plugin.savedRules, hasLength(1));
+      expect(plugin.savedRules.single.name, 'Updated Name');
+    });
+
+    test('importRulesJson persists across a fresh instance', () async {
+      final plugin = SmartPlaylistPlugin();
+      await plugin.importRulesJson(exportRulesToJson([rule('1')]));
+
+      final freshInstance = SmartPlaylistPlugin();
+      await freshInstance.storage.initialize();
+      expect(freshInstance.savedRules.map((r) => r.id), ['1']);
+    });
+
+    test('importRulesJson with malformed input imports nothing and '
+        'leaves existing saved rules untouched', () async {
+      final plugin = SmartPlaylistPlugin();
+      await plugin.saveRule(rule('existing'));
+
+      final imported = await plugin.importRulesJson('not valid json {{{');
+
+      expect(imported, 0);
+      expect(plugin.savedRules.map((r) => r.id), ['existing']);
+    });
+  });
 }

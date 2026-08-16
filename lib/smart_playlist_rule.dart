@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:omnis_plugin_api/base_track.dart';
 import 'package:omnis_plugin_api/service_interfaces.dart' show ThumbState;
 
@@ -315,5 +317,51 @@ class SmartPlaylistRule {
       matchType: matchType,
       conditions: conditions,
     );
+  }
+}
+
+/// This export payload's current shape version — bumped only if the
+/// envelope structure itself ever needs to change; each [SmartPlaylistRule]
+/// inside already carries its own `toJson()`/`fromJson()` shape
+/// independently, the same layering `schema_versioning.dart`'s
+/// envelope/payload split uses elsewhere in the main app.
+const _exportSchemaVersion = 1;
+
+/// Item 42's "no import/export" gap — a plain JSON envelope a listener
+/// can copy/paste (via the clipboard, not a file — deliberately, so
+/// this feature adds no new dependency like `file_picker` to a package
+/// that doesn't otherwise need one) to share a smart playlist with
+/// another install, or just back one up outside this app's own storage.
+/// Reuses each [SmartPlaylistRule]'s existing [SmartPlaylistRule.toJson]
+/// rather than inventing a second serialization for the same model.
+String exportRulesToJson(List<SmartPlaylistRule> rules) => jsonEncode({
+      'schemaVersion': _exportSchemaVersion,
+      'rules': rules.map((r) => r.toJson()).toList(),
+    });
+
+/// Decodes [raw] back into a list of rules. Per-entry defensive, the
+/// same contract [SmartPlaylistRule.fromJson] itself already documents
+/// one level down — a single malformed rule in a pasted payload (hand-
+/// edited, truncated in transit, from a future/older app version) is
+/// skipped rather than discarding every other rule in the same paste.
+/// Malformed JSON, or JSON that isn't the expected envelope shape at
+/// all, returns an empty list rather than throwing — the same "a bad
+/// paste finds nothing to import, not a crash" contract every other
+/// parser in this app already follows for hand-editable input.
+List<SmartPlaylistRule> importRulesFromJson(String raw) {
+  try {
+    final decoded = jsonDecode(raw);
+    if (decoded is! Map) return const [];
+    final rawRules = decoded['rules'];
+    if (rawRules is! List) return const [];
+    final rules = <SmartPlaylistRule>[];
+    for (final entry in rawRules) {
+      if (entry is! Map) continue;
+      final rule = SmartPlaylistRule.fromJson(Map<String, dynamic>.from(entry));
+      if (rule != null) rules.add(rule);
+    }
+    return rules;
+  } catch (_) {
+    return const [];
   }
 }
