@@ -36,6 +36,17 @@ import 'package:omnis_plugin_api/service_interfaces.dart';
 /// common case on a build without Bluetooth support), bands fall back to
 /// one shared default profile, matching this plugin's original behavior.
 ///
+/// Also per-artist/per-album (item 20's remaining named gap): tapping
+/// "Save for [Artist]"/"Save for [Album]" in the bands editor saves the
+/// current bands under that specific artist/album rather than the
+/// connected device, and [onTrackStart] re-resolves which saved profile
+/// applies every time a track starts, via [_resolveKey] —
+/// **album beats artist**: a saved album profile is the more specific
+/// choice — a user who bothered to save one for one particular album by
+/// an artist clearly wants it to override whatever they saved for that
+/// artist more broadly — which in turn beats the device profile, which
+/// beats the shared default.
+///
 /// NOTE: the hardware path has not been exercised against a real Android
 /// device while building this — `PluginContext.ensureHardwareEqLoaded`
 /// fails closed (falls back to virtual mode) on any platform-channel
@@ -66,13 +77,77 @@ class EqualizerPlugin extends MusicPlugin {
   String? _currentDevice;
   StreamSubscription<String?>? _deviceSub;
 
+  /// The current track's primary artist/album, from the most recent
+  /// [onTrackStart] — `null` before any track has started, or when the
+  /// track has no real artist/album to key a profile by. Exposed
+  /// read-only so the bands editor can label its "Save for …" buttons.
+  String? _currentArtist;
+  String? _currentAlbum;
+  String? get currentArtist => _currentArtist;
+  String? get currentAlbum => _currentAlbum;
+
   String _virtualKeyFor(String? device) => device == null
       ? _virtualBandsStorageKey
       : '${_virtualBandsStorageKey}_device_$device';
 
+  String _virtualKeyForArtist(String artist) =>
+      '${_virtualBandsStorageKey}_artist_$artist';
+  String _virtualKeyForAlbum(String album) =>
+      '${_virtualBandsStorageKey}_album_$album';
+
   String _hardwareKeyFor(String? device) => device == null
       ? _hardwareBandsStorageKey
       : '${_hardwareBandsStorageKey}_device_$device';
+
+  String _hardwareKeyForArtist(String artist) =>
+      '${_hardwareBandsStorageKey}_artist_$artist';
+  String _hardwareKeyForAlbum(String album) =>
+      '${_hardwareBandsStorageKey}_album_$album';
+
+  /// Which key actually holds the profile to use right now, in
+  /// precedence order (see the class doc's "album beats artist" note):
+  /// the first of [candidates] that [hasProfile] confirms has something
+  /// saved, or [fallback] (checked or not) if none do — the same
+  /// device-or-shared-default key this plugin always fell back to
+  /// before artist/album profiles existed, which still needs no
+  /// [hasProfile] check of its own since [_readBandMap] already
+  /// degrades an empty/missing key to flat bands correctly.
+  static String _resolveKey({
+    required List<String> candidates,
+    required String fallback,
+    required bool Function(String key) hasProfile,
+  }) {
+    for (final key in candidates) {
+      if (hasProfile(key)) return key;
+    }
+    return fallback;
+  }
+
+  String _resolveVirtualKey() => _resolveKey(
+        candidates: [
+          if (_currentAlbum != null) _virtualKeyForAlbum(_currentAlbum!),
+          if (_currentArtist != null) _virtualKeyForArtist(_currentArtist!),
+        ],
+        fallback: _virtualKeyFor(_currentDevice),
+        hasProfile: (key) => storage.getString(key) != null,
+      );
+
+  String _resolveHardwareKey() => _resolveKey(
+        candidates: [
+          if (_currentAlbum != null) _hardwareKeyForAlbum(_currentAlbum!),
+          if (_currentArtist != null) _hardwareKeyForArtist(_currentArtist!),
+        ],
+        fallback: _hardwareKeyFor(_currentDevice),
+        hasProfile: (key) => storage.getString(key) != null,
+      );
+
+  /// Whichever key bands were actually loaded from last (device/default,
+  /// or a more specific artist/album match) — kept as state rather than
+  /// re-resolved on every persist so that a plain slider drag or Reset
+  /// updates *that* profile, not silently the device/default one, while
+  /// an artist/album profile is the one currently active.
+  String _activeVirtualKey = _virtualBandsStorageKey;
+  String _activeHardwareKey = _hardwareBandsStorageKey;
 
   /// Real hardware bands, if this platform provides them.
   List<HardwareEqBand> get hardwareBands =>
@@ -121,10 +196,33 @@ class EqualizerPlugin extends MusicPlugin {
   }
 
   /// Save the current virtual band values so they survive a restart —
-  /// under the currently-connected device's own key, if any (see
-  /// [_virtualKeyFor]).
+  /// under whichever key is currently active ([_activeVirtualKey]:
+  /// device/default, or a more specific artist/album profile once one's
+  /// been saved for the playing track).
   Future<void> persistVirtualBands() =>
-      _persistBandMap(_virtualKeyFor(_currentDevice), _virtualBands);
+      _persistBandMap(_activeVirtualKey, _virtualBands);
+
+  /// Explicitly saves the current bands as [_currentArtist]'s own
+  /// profile — a no-op with nothing playing (or a track with no real
+  /// artist). Becomes the active profile immediately, so further plain
+  /// edits (a slider drag, Reset) update *this* profile rather than
+  /// requiring "Save for artist" again.
+  Future<void> persistVirtualBandsForArtist() async {
+    final artist = _currentArtist;
+    if (artist == null) return;
+    _activeVirtualKey = _virtualKeyForArtist(artist);
+    await _persistBandMap(_activeVirtualKey, _virtualBands);
+  }
+
+  /// Same as [persistVirtualBandsForArtist], but for [_currentAlbum] —
+  /// the higher-precedence scope (see the class doc's "album beats
+  /// artist" note).
+  Future<void> persistVirtualBandsForAlbum() async {
+    final album = _currentAlbum;
+    if (album == null) return;
+    _activeVirtualKey = _virtualKeyForAlbum(album);
+    await _persistBandMap(_activeVirtualKey, _virtualBands);
+  }
 
   /// Live-update a real hardware band by its device-reported index. Cheap
   /// enough for drag frames — it's a single platform-channel call, not a
@@ -149,13 +247,32 @@ class EqualizerPlugin extends MusicPlugin {
     await persistHardwareBands();
   }
 
+  Map<String, double> get _currentHardwareBandMap =>
+      {for (final band in hardwareBands) '${band.index}': band.gain};
+
   /// Save the current hardware band values so they survive a restart —
-  /// under the currently-connected device's own key, if any (see
-  /// [_hardwareKeyFor]).
-  Future<void> persistHardwareBands() => _persistBandMap(
-        _hardwareKeyFor(_currentDevice),
-        {for (final band in hardwareBands) '${band.index}': band.gain},
-      );
+  /// under whichever key is currently active ([_activeHardwareKey]:
+  /// device/default, or a more specific artist/album profile).
+  Future<void> persistHardwareBands() =>
+      _persistBandMap(_activeHardwareKey, _currentHardwareBandMap);
+
+  /// Explicitly saves the current hardware bands as [_currentArtist]'s
+  /// own profile. See [persistVirtualBandsForArtist] — same shape, the
+  /// hardware-mode counterpart.
+  Future<void> persistHardwareBandsForArtist() async {
+    final artist = _currentArtist;
+    if (artist == null) return;
+    _activeHardwareKey = _hardwareKeyForArtist(artist);
+    await _persistBandMap(_activeHardwareKey, _currentHardwareBandMap);
+  }
+
+  /// Same as [persistHardwareBandsForArtist], but for [_currentAlbum].
+  Future<void> persistHardwareBandsForAlbum() async {
+    final album = _currentAlbum;
+    if (album == null) return;
+    _activeHardwareKey = _hardwareKeyForAlbum(album);
+    await _persistBandMap(_activeHardwareKey, _currentHardwareBandMap);
+  }
 
   /// Overall loudness trim derived from the three virtual bands, for use
   /// as an `AudioEngine` gain contribution. When real hardware bands are
@@ -207,7 +324,7 @@ class EqualizerPlugin extends MusicPlugin {
     _deviceSub?.cancel();
     _deviceSub = provider?.deviceChanges.listen(_onDeviceChanged);
 
-    _loadVirtualBandsFor(_currentDevice);
+    _loadVirtualBands();
     await context?.ensureHardwareEqLoaded();
     await _restoreHardwareIfNeeded();
     if (!hasHardwareBands) {
@@ -215,34 +332,47 @@ class EqualizerPlugin extends MusicPlugin {
     }
   }
 
-  /// Loads (or resets to flat, if this device has no saved profile yet)
-  /// the virtual bands for [device] into [_virtualBands] — does not
-  /// itself apply the resulting gain; callers that need the audible
-  /// effect to update immediately (see [_onDeviceChanged]) do that
-  /// afterward.
-  void _loadVirtualBandsFor(String? device) {
-    final saved = _readBandMap(_virtualKeyFor(device));
+  /// Loads (or resets to flat, if nothing's saved for it yet) the
+  /// virtual bands from whichever key [_resolveVirtualKey] currently
+  /// resolves to — album/artist/device/default, in that precedence
+  /// order — into [_virtualBands] and records it as [_activeVirtualKey].
+  /// Does not itself apply the resulting gain; callers that need the
+  /// audible effect to update immediately (see [_onDeviceChanged]/
+  /// [onTrackStart]) do that afterward.
+  void _loadVirtualBands() {
+    _activeVirtualKey = _resolveVirtualKey();
+    final saved = _readBandMap(_activeVirtualKey);
     for (final key in virtualBandKeys) {
       _virtualBands[key] = (saved[key] ?? 0.0).clamp(-12.0, 12.0);
     }
   }
 
-  /// Re-loads whichever profile matches the now-connected device (or the
-  /// shared default profile, when [device] is `null`) and applies it
-  /// immediately — plugging in a different pair of headphones should
-  /// audibly switch EQ right away, the same "just connected, things
-  /// happen" spirit `BluetoothPlaybackPlugin`'s quick-play already has.
+  /// Re-resolves and re-loads whichever profile now applies — the
+  /// now-connected device (or the shared default, when [device] is
+  /// `null`), unless a more specific artist/album profile for the
+  /// currently-playing track overrides it — and applies it immediately:
+  /// plugging in a different pair of headphones should audibly switch
+  /// EQ right away, the same "just connected, things happen" spirit
+  /// `BluetoothPlaybackPlugin`'s quick-play already has.
   Future<void> _onDeviceChanged(String? device) async {
     _currentDevice = device;
-    _loadVirtualBandsFor(device);
+    await _reapplyResolvedProfile();
+  }
+
+  /// Shared by [_onDeviceChanged] and [onTrackStart] — both change what
+  /// [_resolveVirtualKey]/[_resolveHardwareKey] would pick (a different
+  /// device, or a different track's artist/album), so both need the
+  /// same "re-resolve, reload, re-apply" sequence.
+  Future<void> _reapplyResolvedProfile() async {
+    _loadVirtualBands();
     if (!hasHardwareBands) {
       await context?.setGain(gainSource, combinedMultiplier);
       return;
     }
-    // A device change can also mean the hardware bands themselves
-    // changed identity (different device, different EQ hardware) — force
-    // a fresh restore against the new device's saved profile rather than
-    // trusting whatever _hardwareRestored's prior state was.
+    // The resolved key can change even when the hardware bands
+    // themselves didn't — force a fresh restore against whatever now
+    // resolves, rather than trusting whatever _hardwareRestored's prior
+    // state was.
     _hardwareRestored = false;
     await _restoreHardwareIfNeeded();
   }
@@ -250,10 +380,11 @@ class EqualizerPlugin extends MusicPlugin {
   Future<void> _restoreHardwareIfNeeded() async {
     if (_hardwareRestored || !hasHardwareBands) return;
     _hardwareRestored = true;
-    final saved = _readBandMap(_hardwareKeyFor(_currentDevice));
+    _activeHardwareKey = _resolveHardwareKey();
+    final saved = _readBandMap(_activeHardwareKey);
     if (saved.isEmpty) {
-      // No saved profile for this device — start flat rather than
-      // carrying over whatever the previous device's bands happened to
+      // No saved profile for this key — start flat rather than
+      // carrying over whatever the previous profile's bands happened to
       // be left at.
       for (final band in hardwareBands) {
         await band.setGain(0.0);
@@ -267,7 +398,13 @@ class EqualizerPlugin extends MusicPlugin {
   }
 
   @override
-  Future<void> onTrackStart(BaseTrack track) async {}
+  Future<void> onTrackStart(BaseTrack track) async {
+    final artist = track.artists.isNotEmpty ? track.artists.first.trim() : '';
+    _currentArtist = artist.isEmpty ? null : artist;
+    final album = track.album.trim();
+    _currentAlbum = album.isEmpty ? null : album;
+    await _reapplyResolvedProfile();
+  }
 
   @override
   Future<void> onLibraryScan(String file) async {}
@@ -421,6 +558,29 @@ class _EqualizerBandsEditorState extends State<_EqualizerBandsEditor> {
           height: 220,
           child: hardware ? _buildHardwareBands(plugin) : _buildVirtualBands(plugin),
         ),
+        if (plugin.currentArtist != null || plugin.currentAlbum != null) ...[
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              if (plugin.currentArtist != null)
+                OutlinedButton(
+                  onPressed: () => hardware
+                      ? plugin.persistHardwareBandsForArtist()
+                      : plugin.persistVirtualBandsForArtist(),
+                  child: Text('Save for ${plugin.currentArtist}'),
+                ),
+              if (plugin.currentAlbum != null)
+                OutlinedButton(
+                  onPressed: () => hardware
+                      ? plugin.persistHardwareBandsForAlbum()
+                      : plugin.persistVirtualBandsForAlbum(),
+                  child: Text('Save for ${plugin.currentAlbum}'),
+                ),
+            ],
+          ),
+        ],
       ],
     );
   }
