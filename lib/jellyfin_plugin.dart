@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:omnis_plugin_api/base_track.dart';
 import 'package:omnis_plugin_api/plugin_interface.dart';
+import 'package:omnis_plugin_api/service_interfaces.dart';
 
 /// Connects to a self-hosted Jellyfin media server via its REST API.
 ///
@@ -34,7 +35,7 @@ import 'package:omnis_plugin_api/plugin_interface.dart';
 /// environment — what's verified is protocol-level request/response
 /// handling against a mocked HTTP client (see this class's tests), not a
 /// live server round-trip.
-class JellyfinPlugin extends MusicPlugin {
+class JellyfinPlugin extends MusicPlugin implements IOnlineSearchProvider {
   static const _serverUrlKey = 'server_url';
   static const _usernameKey = 'username';
   static const _passwordKey = 'password';
@@ -289,7 +290,12 @@ class JellyfinPlugin extends MusicPlugin {
   bool get usesNetwork => true;
 
   @override
-  Future<void> initialize() async {}
+  String get providerName => name;
+
+  @override
+  Future<void> initialize() async {
+    context?.services.register(IOnlineSearchProvider, this);
+  }
 
   @override
   Future<void> onTrackStart(BaseTrack track) async {}
@@ -303,7 +309,18 @@ class JellyfinPlugin extends MusicPlugin {
 
   @override
   Future<void> dispose() async {
+    context?.services.unregister(IOnlineSearchProvider, this);
     _client.close();
+  }
+
+  @override
+  Future<void> enable() async {
+    context?.services.register(IOnlineSearchProvider, this);
+  }
+
+  @override
+  Future<void> disable() async {
+    context?.services.unregister(IOnlineSearchProvider, this);
   }
 }
 

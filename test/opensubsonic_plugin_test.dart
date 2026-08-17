@@ -6,8 +6,26 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:omnis_plugin_api/base_track.dart';
+import 'package:omnis_plugin_api/plugin_context.dart';
+import 'package:omnis_plugin_api/service_interfaces.dart';
+import 'package:omnis_plugin_api/service_registry.dart';
 import 'package:omnis_plugins/opensubsonic_plugin.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+/// Minimal `PluginContext` stand-in so a lifecycle test can inspect
+/// `IOnlineSearchProvider` registration without the real
+/// `OmnisPluginContext` — same pattern `queue_preset_plugin_test.dart`
+/// already established for `IQueueBuilder`.
+class _FakeContext implements PluginContext {
+  final ServiceRegistry servicesRegistry = ServiceRegistry();
+
+  @override
+  ServiceRegistry get services => servicesRegistry;
+
+  @override
+  noSuchMethod(Invocation invocation) =>
+      throw UnsupportedError('${invocation.memberName} not stubbed');
+}
 
 /// A fixed-sequence "random" source so tests can predict exactly what
 /// salt the plugin generates and independently verify the auth token
@@ -388,5 +406,42 @@ void main() {
     final plugin = OpenSubsonicPlugin();
     expect(plugin.id, 'opensubsonic');
     expect(plugin.usesNetwork, isTrue);
+  });
+
+  group('IOnlineSearchProvider lifecycle', () {
+    test('providerName matches name', () {
+      final plugin = OpenSubsonicPlugin();
+      expect(plugin.providerName, plugin.name);
+    });
+
+    test('initialize registers IOnlineSearchProvider; dispose unregisters '
+        'it', () async {
+      final plugin = OpenSubsonicPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+
+      expect(ctx.servicesRegistry.has<IOnlineSearchProvider>(), isFalse);
+      await plugin.initialize();
+      expect(ctx.servicesRegistry.has<IOnlineSearchProvider>(), isTrue);
+      expect(ctx.servicesRegistry.get<IOnlineSearchProvider>(), same(plugin));
+
+      await plugin.dispose();
+      expect(ctx.servicesRegistry.has<IOnlineSearchProvider>(), isFalse);
+    });
+
+    test('disable unregisters; enable re-registers', () async {
+      final plugin = OpenSubsonicPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+
+      await plugin.enable();
+      expect(ctx.servicesRegistry.has<IOnlineSearchProvider>(), isTrue);
+
+      await plugin.disable();
+      expect(ctx.servicesRegistry.has<IOnlineSearchProvider>(), isFalse);
+
+      await plugin.enable();
+      expect(ctx.servicesRegistry.has<IOnlineSearchProvider>(), isTrue);
+    });
   });
 }

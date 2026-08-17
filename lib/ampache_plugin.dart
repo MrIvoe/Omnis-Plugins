@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:omnis_plugin_api/base_track.dart';
 import 'package:omnis_plugin_api/plugin_interface.dart';
+import 'package:omnis_plugin_api/service_interfaces.dart';
 
 /// Connects to a self-hosted Ampache media server via its JSON API.
 ///
@@ -40,7 +41,7 @@ import 'package:omnis_plugin_api/plugin_interface.dart';
 /// exact field set was not fully confirmed from documentation alone
 /// (Ampache's own docs list both `title` and `name` for the same field);
 /// this plugin reads either, defensively.
-class AmpachePlugin extends MusicPlugin {
+class AmpachePlugin extends MusicPlugin implements IOnlineSearchProvider {
   static const _serverUrlKey = 'server_url';
   static const _usernameKey = 'username';
   static const _passwordKey = 'password';
@@ -319,8 +320,16 @@ class AmpachePlugin extends MusicPlugin {
   @override
   bool get usesNetwork => true;
 
+  // IOnlineSearchProvider — the "Online" tab's search-provider registry
+  // reads the plugin's own display name, matching `name` exactly rather
+  // than a separately-maintained label.
   @override
-  Future<void> initialize() async {}
+  String get providerName => name;
+
+  @override
+  Future<void> initialize() async {
+    context?.services.register(IOnlineSearchProvider, this);
+  }
 
   @override
   Future<void> onTrackStart(BaseTrack track) async {}
@@ -334,7 +343,18 @@ class AmpachePlugin extends MusicPlugin {
 
   @override
   Future<void> dispose() async {
+    context?.services.unregister(IOnlineSearchProvider, this);
     _client.close();
+  }
+
+  @override
+  Future<void> enable() async {
+    context?.services.register(IOnlineSearchProvider, this);
+  }
+
+  @override
+  Future<void> disable() async {
+    context?.services.unregister(IOnlineSearchProvider, this);
   }
 }
 

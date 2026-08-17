@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:omnis_plugin_api/base_track.dart';
 import 'package:omnis_plugin_api/plugin_interface.dart';
+import 'package:omnis_plugin_api/service_interfaces.dart';
 
 /// Connects to any OpenSubsonic-compatible media server — Navidrome,
 /// Airsonic, the original Subsonic, and anything else implementing the
@@ -36,7 +37,7 @@ import 'package:omnis_plugin_api/plugin_interface.dart';
 /// in this environment — what's verified is protocol-level request/
 /// response handling against a mocked HTTP client (see this class's
 /// tests), not a live server round-trip.
-class OpenSubsonicPlugin extends MusicPlugin {
+class OpenSubsonicPlugin extends MusicPlugin implements IOnlineSearchProvider {
   static const _serverUrlKey = 'server_url';
   static const _usernameKey = 'username';
   static const _passwordKey = 'password';
@@ -147,12 +148,12 @@ class OpenSubsonicPlugin extends MusicPlugin {
   /// set on genuine failure, cleared on success) for a blank query, an
   /// unconfigured plugin, a network failure, a non-200 response, or a
   /// server-reported error — never throws.
-  Future<List<BaseTrack>> search(String query, {int songCount = 25}) async {
+  Future<List<BaseTrack>> search(String query, {int limit = 25}) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty || !isConfigured) return const [];
     final uri = _buildUri('search3.view', {
       'query': trimmed,
-      'songCount': '$songCount',
+      'songCount': '$limit',
       // Only songs — this plugin plays tracks directly, not a
       // browse-by-artist/album UI, so there's no use for the other two
       // result categories search3 can also return.
@@ -282,7 +283,12 @@ class OpenSubsonicPlugin extends MusicPlugin {
   bool get usesNetwork => true;
 
   @override
-  Future<void> initialize() async {}
+  String get providerName => name;
+
+  @override
+  Future<void> initialize() async {
+    context?.services.register(IOnlineSearchProvider, this);
+  }
 
   @override
   Future<void> onTrackStart(BaseTrack track) async {}
@@ -297,7 +303,18 @@ class OpenSubsonicPlugin extends MusicPlugin {
 
   @override
   Future<void> dispose() async {
+    context?.services.unregister(IOnlineSearchProvider, this);
     _client.close();
+  }
+
+  @override
+  Future<void> enable() async {
+    context?.services.register(IOnlineSearchProvider, this);
+  }
+
+  @override
+  Future<void> disable() async {
+    context?.services.unregister(IOnlineSearchProvider, this);
   }
 }
 
