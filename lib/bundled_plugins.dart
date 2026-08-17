@@ -1,5 +1,6 @@
 import 'package:omnis_plugin_api/plugin_interface.dart';
 import 'package:omnis_plugins/ai_playlist_plugin.dart';
+import 'package:omnis_plugins/ampache_plugin.dart';
 import 'package:omnis_plugins/artist_image_plugin.dart';
 import 'package:omnis_plugins/audio_analysis_plugin.dart';
 import 'package:omnis_plugins/bluetooth_playback_plugin.dart';
@@ -95,6 +96,7 @@ List<MusicPlugin> createBundledPlugins() {
     () => OpenSubsonicPlugin(),
     () => JellyfinPlugin(),
     () => EmbyPlugin(),
+    () => AmpachePlugin(),
     () => PlexPlugin(),
     () => DlnaPlugin(),
     () => ArtistImagePlugin(),
