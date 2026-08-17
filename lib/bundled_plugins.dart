@@ -11,6 +11,7 @@ import 'package:omnis_plugins/emby_plugin.dart';
 import 'package:omnis_plugins/equalizer_plugin.dart';
 import 'package:omnis_plugins/favorites_plugin.dart';
 import 'package:omnis_plugins/jellyfin_plugin.dart';
+import 'package:omnis_plugins/koel_plugin.dart';
 import 'package:omnis_plugins/lyrics_plugin.dart';
 import 'package:omnis_plugins/metadata_enrichment_plugin.dart';
 import 'package:omnis_plugins/opensubsonic_plugin.dart';
@@ -97,6 +98,7 @@ List<MusicPlugin> createBundledPlugins() {
     () => JellyfinPlugin(),
     () => EmbyPlugin(),
     () => AmpachePlugin(),
+    () => KoelPlugin(),
     () => PlexPlugin(),
     () => DlnaPlugin(),
     () => ArtistImagePlugin(),
