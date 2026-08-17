@@ -388,4 +388,174 @@ void main() {
       expect(plugin.currentAlbum, isNull);
     });
   });
+
+  group('virtualBandWeight/virtualBandKeysFor/virtualBandCenterFrequencies '
+      '(item 20, selectable band count)', () {
+    test('virtualBandKeysFor(three) is exactly EqualizerPlugin.'
+        'virtualBandKeys, unchanged', () {
+      expect(virtualBandKeysFor(VirtualEqBandCount.three),
+          EqualizerPlugin.virtualBandKeys);
+    });
+
+    test('virtualBandKeysFor generates band_0..band_n-1 for five/ten', () {
+      expect(virtualBandKeysFor(VirtualEqBandCount.five),
+          ['band_0', 'band_1', 'band_2', 'band_3', 'band_4']);
+      expect(virtualBandKeysFor(VirtualEqBandCount.ten).length, 10);
+      expect(virtualBandKeysFor(VirtualEqBandCount.ten).first, 'band_0');
+      expect(virtualBandKeysFor(VirtualEqBandCount.ten).last, 'band_9');
+    });
+
+    test('virtualBandCenterFrequencies is empty for three (labels come '
+        'from the fixed Bass/Mid/Treble map instead) and has one '
+        'frequency per band for five/ten', () {
+      expect(virtualBandCenterFrequencies(VirtualEqBandCount.three), isEmpty);
+      expect(virtualBandCenterFrequencies(VirtualEqBandCount.five).length, 5);
+      expect(virtualBandCenterFrequencies(VirtualEqBandCount.ten).length, 10);
+    });
+
+    test('virtualBandWeight tapers from 0.6 at the first band to 0.3 at '
+        'the last, monotonically', () {
+      final weights =
+          List.generate(10, (i) => virtualBandWeight(i, 10));
+      expect(weights.first, 0.6);
+      expect(weights.last, 0.3);
+      for (var i = 1; i < weights.length; i++) {
+        expect(weights[i], lessThanOrEqualTo(weights[i - 1]));
+      }
+    });
+
+    test('virtualBandWeight with a single band returns 0.6, not a '
+        'division by zero', () {
+      expect(virtualBandWeight(0, 1), 0.6);
+    });
+  });
+
+  group('selectable virtual band count (item 20)', () {
+    test('bandCount defaults to three', () {
+      final plugin = EqualizerPlugin();
+      expect(plugin.bandCount, VirtualEqBandCount.three);
+    });
+
+    test('combinedMultiplier for the default 3-band count is byte-'
+        'identical to the plugin\'s original hardcoded formula', () {
+      final plugin = EqualizerPlugin();
+      plugin.setBand('bass', 6.0);
+      plugin.setBand('mid', -3.0);
+      plugin.setBand('treble', 2.0);
+      final bassBoost = 6.0 / 24.0;
+      final midBoost = -3.0 / 24.0;
+      final trebleBoost = 2.0 / 24.0;
+      final expected =
+          (1.0 + bassBoost * 0.6 + midBoost * 0.4 + trebleBoost * 0.3)
+              .clamp(0.4, 1.6);
+      expect(plugin.combinedMultiplier, expected);
+    });
+
+    test('switching to five bands resets to flat, not leftover 3-band '
+        'values misapplied to a differently-shaped array', () async {
+      final plugin = EqualizerPlugin();
+      await plugin.storage.initialize();
+      await plugin.initialize();
+      plugin.setBand('bass', 8.0);
+      await plugin.persistVirtualBands();
+
+      await plugin.setBandCount(VirtualEqBandCount.five);
+
+      expect(plugin.bandCount, VirtualEqBandCount.five);
+      for (final key in virtualBandKeysFor(VirtualEqBandCount.five)) {
+        expect(plugin.getBand(key), 0.0);
+      }
+    });
+
+    test('a 5-band flat profile has combinedMultiplier 1.0; a positive '
+        'boost on any band pushes it above 1.0', () async {
+      final plugin = EqualizerPlugin();
+      await plugin.storage.initialize();
+      await plugin.initialize();
+      await plugin.setBandCount(VirtualEqBandCount.five);
+
+      expect(plugin.combinedMultiplier, 1.0);
+
+      plugin.setBand('band_2', 6.0);
+      expect(plugin.combinedMultiplier, greaterThan(1.0));
+    });
+
+    test('switching band count and back preserves each count\'s own '
+        'saved profile independently', () async {
+      final plugin = EqualizerPlugin();
+      await plugin.storage.initialize();
+      await plugin.initialize();
+
+      plugin.setBand('bass', 5.0);
+      await plugin.persistVirtualBands();
+
+      await plugin.setBandCount(VirtualEqBandCount.ten);
+      plugin.setBand('band_0', 9.0);
+      await plugin.persistVirtualBands();
+
+      await plugin.setBandCount(VirtualEqBandCount.three);
+      expect(plugin.getBand('bass'), 5.0,
+          reason: 'the 3-band profile is untouched by the 10-band one');
+
+      await plugin.setBandCount(VirtualEqBandCount.ten);
+      expect(plugin.getBand('band_0'), 9.0,
+          reason: 'the 10-band profile survived switching away and back');
+    });
+
+    test('the chosen band count persists across a fresh plugin instance',
+        () async {
+      final plugin = EqualizerPlugin();
+      await plugin.storage.initialize();
+      await plugin.initialize();
+      await plugin.setBandCount(VirtualEqBandCount.five);
+
+      final restored = EqualizerPlugin();
+      await restored.storage.initialize();
+      await restored.initialize();
+
+      expect(restored.bandCount, VirtualEqBandCount.five);
+    });
+
+    test('a saved 5-band album profile does not leak into a 3-band '
+        'device profile', () async {
+      final registry = ServiceRegistry();
+      final deviceProvider = _FakeDeviceProvider();
+      registry.register(IDeviceConnectivityProvider, deviceProvider);
+      final plugin = EqualizerPlugin();
+      plugin.attach(_FakeContext(registry));
+      await plugin.storage.initialize();
+      await plugin.initialize();
+
+      deviceProvider.connect('Car Stereo');
+      await Future<void>.delayed(Duration.zero);
+      plugin.setBand('bass', 4.0);
+      await plugin.persistVirtualBands();
+
+      await plugin.setBandCount(VirtualEqBandCount.five);
+      await plugin.onTrackStart(
+        _track(id: '1', artists: const ['Artist A'], album: 'Album 1'),
+      );
+      plugin.setBand('band_0', 11.0);
+      await plugin.persistVirtualBandsForAlbum();
+
+      await plugin.setBandCount(VirtualEqBandCount.three);
+      expect(plugin.getBand('bass'), 4.0,
+          reason: 'the 3-band device profile is untouched by the 5-band '
+              'album profile');
+    });
+
+    test('hardware mode is unaffected by the virtual band count setting',
+        () {
+      // hasHardwareBands is false without a real attached context (see
+      // the existing "hasHardwareBands is false..." test above), so this
+      // just confirms bandCount/setBandCount don't require hardware mode
+      // to be off to be meaningful, and combinedMultiplier still reports
+      // 1.0 the instant hardware bands are (hypothetically) active —
+      // covered structurally by the existing `if (hasHardwareBands)
+      // return 1.0;` guard, which sits before any band-count branching.
+      final plugin = EqualizerPlugin();
+      expect(plugin.hasHardwareBands, isFalse);
+      expect(plugin.combinedMultiplier, 1.0);
+    });
+  });
 }

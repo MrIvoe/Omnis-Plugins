@@ -7,6 +7,78 @@ import 'package:omnis_plugin_api/hardware_eq_band.dart';
 import 'package:omnis_plugin_api/plugin_interface.dart';
 import 'package:omnis_plugin_api/service_interfaces.dart';
 
+/// How many virtual bands [EqualizerPlugin]'s non-hardware model exposes
+/// — item 20's "no selectable band count" gap. The default, [three],
+/// keeps the plugin's original `bass`/`mid`/`treble` keys and exact
+/// weighting untouched — an existing saved profile round-trips byte-
+/// identically, and nobody who never opens this control notices any
+/// change. [five]/[ten] use generated `band_0`.. keys at conventional
+/// graphic-EQ center frequencies instead — still the same honest
+/// overall-loudness-trim approximation the class doc describes, just
+/// with finer-grained sliders feeding it, not real per-frequency DSP.
+enum VirtualEqBandCount {
+  three(3),
+  five(5),
+  ten(10);
+
+  final int bandCount;
+  const VirtualEqBandCount(this.bandCount);
+
+  static VirtualEqBandCount fromBandCount(int? count) => switch (count) {
+        5 => VirtualEqBandCount.five,
+        10 => VirtualEqBandCount.ten,
+        _ => VirtualEqBandCount.three,
+      };
+}
+
+/// The virtual-model band keys for [count], in display order. [three]
+/// reuses [EqualizerPlugin.virtualBandKeys] unchanged; [five]/[ten]
+/// generate `band_0`..`band_{n-1}`.
+List<String> virtualBandKeysFor(VirtualEqBandCount count) =>
+    count == VirtualEqBandCount.three
+        ? EqualizerPlugin.virtualBandKeys
+        : List.generate(count.bandCount, (i) => 'band_$i');
+
+/// Conventional graphic-EQ center frequencies (Hz) for [count]'s bands,
+/// for labeling [five]/[ten] sliders — [three] keeps its existing
+/// "Bass"/"Mid"/"Treble" labels instead, so this is never called for it.
+/// [five] mirrors a classic Winamp/foobar2000 5-band layout; [ten] is the
+/// ISO-standard 10-band graphic-EQ octave centers.
+List<double> virtualBandCenterFrequencies(VirtualEqBandCount count) =>
+    switch (count) {
+      VirtualEqBandCount.three => const [],
+      VirtualEqBandCount.five => const [60, 230, 910, 3600, 14000],
+      VirtualEqBandCount.ten => const [
+          31,
+          62,
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000,
+          16000,
+        ],
+    };
+
+/// The [combinedMultiplier]/[EqualizerPlugin.applyGain] contribution
+/// weight for band [index] of [totalBands] — more weight to bass,
+/// tapering to treble, the same shape the original fixed 3-band
+/// `0.6/0.4/0.3` weights always had. Linearly interpolated for band
+/// counts other than 3 (which uses those exact original constants
+/// instead of this formula — see [EqualizerPlugin.combinedMultiplier] —
+/// since a plain interpolation over 3 points doesn't reproduce `0.4` at
+/// the middle band, and preserving the original 3-band audio behavior
+/// byte-for-byte matters more than one shared formula for every count).
+double virtualBandWeight(int index, int totalBands) {
+  if (totalBands <= 1) return 0.6;
+  const start = 0.6;
+  const end = 0.3;
+  final t = index / (totalBands - 1);
+  return start + (end - start) * t;
+}
+
 /// A bundled equalizer plugin with two implementations behind one API:
 ///
 ///  - **Hardware mode** (Android only): drives the OS's real per-band
@@ -61,12 +133,31 @@ class EqualizerPlugin extends MusicPlugin {
 
   static const _virtualBandsStorageKey = 'virtual_bands';
   static const _hardwareBandsStorageKey = 'hardware_bands';
+  static const _bandCountStorageKey = 'virtual_band_count';
 
-  final Map<String, double> _virtualBands = {
+  Map<String, double> _virtualBands = {
     for (final key in virtualBandKeys) key: 0.0,
   };
 
   bool _hardwareRestored = false;
+
+  /// How many virtual bands are currently in play — a global choice, not
+  /// scoped per-device/artist/album like the bands themselves: it's a
+  /// precision/UI preference, not a tonal one worth remembering per
+  /// listening context. Defaults to [VirtualEqBandCount.three] — the
+  /// plugin's original behavior, unchanged until a user opts into more.
+  VirtualEqBandCount get bandCount =>
+      VirtualEqBandCount.fromBandCount(storage.getInt(_bandCountStorageKey));
+
+  /// Switches the virtual band count and immediately reloads/reapplies
+  /// whichever profile now resolves under the new count's own storage
+  /// keys (see [_bandCountKeySuffix]) — a saved 3-band profile is never
+  /// discarded by switching to 5 or 10 bands and back, since each
+  /// `(scope, bandCount)` pair has its own bucket.
+  Future<void> setBandCount(VirtualEqBandCount count) async {
+    await storage.setInt(_bandCountStorageKey, count.bandCount);
+    await _reapplyResolvedProfile();
+  }
 
   /// The currently connected output device's name, from
   /// [IDeviceConnectivityProvider] — `null` when nothing is connected or
@@ -86,14 +177,29 @@ class EqualizerPlugin extends MusicPlugin {
   String? get currentArtist => _currentArtist;
   String? get currentAlbum => _currentAlbum;
 
-  String _virtualKeyFor(String? device) => device == null
-      ? _virtualBandsStorageKey
-      : '${_virtualBandsStorageKey}_device_$device';
+  /// Appended to every *virtual*-model storage key (never the hardware
+  /// ones — real hardware bands aren't affected by this setting at all)
+  /// so switching band count can never corrupt or silently discard a
+  /// different band-count's saved profile. Empty for [VirtualEqBandCount.
+  /// three] specifically, so every existing saved profile's key is
+  /// byte-identical to before this feature existed — no migration, no
+  /// behavior change for anyone who never touches this control.
+  String _bandCountKeySuffix() {
+    final count = bandCount;
+    return count == VirtualEqBandCount.three ? '' : '_bandcount${count.bandCount}';
+  }
+
+  String _virtualKeyFor(String? device) {
+    final base = device == null
+        ? _virtualBandsStorageKey
+        : '${_virtualBandsStorageKey}_device_$device';
+    return '$base${_bandCountKeySuffix()}';
+  }
 
   String _virtualKeyForArtist(String artist) =>
-      '${_virtualBandsStorageKey}_artist_$artist';
+      '${_virtualBandsStorageKey}_artist_$artist${_bandCountKeySuffix()}';
   String _virtualKeyForAlbum(String album) =>
-      '${_virtualBandsStorageKey}_album_$album';
+      '${_virtualBandsStorageKey}_album_$album${_bandCountKeySuffix()}';
 
   String _hardwareKeyFor(String? device) => device == null
       ? _hardwareBandsStorageKey
@@ -274,19 +380,34 @@ class EqualizerPlugin extends MusicPlugin {
     await _persistBandMap(_activeHardwareKey, _currentHardwareBandMap);
   }
 
-  /// Overall loudness trim derived from the three virtual bands, for use
-  /// as an `AudioEngine` gain contribution. When real hardware bands are
+  /// Overall loudness trim derived from the virtual bands, for use as an
+  /// `AudioEngine` gain contribution. When real hardware bands are
   /// active, the OS is already shaping the signal, so this contributes
   /// nothing (1.0) rather than double-applying a trim on top of real EQ.
   /// Unlike [applyGain] (a pure function kept for its unit test), this is
   /// not clamped down to 1.0, so a positive boost is actually audible
   /// instead of being clipped away.
+  ///
+  /// The 3-band case keeps the plugin's original hardcoded `0.6/0.4/0.3`
+  /// weights exactly, rather than routing through [virtualBandWeight]'s
+  /// general interpolation — that formula doesn't reproduce `0.4` at the
+  /// middle of 3 points, and preserving byte-identical audio behavior for
+  /// the default band count matters more than one shared formula for
+  /// every count.
   double get combinedMultiplier {
     if (hasHardwareBands) return 1.0;
-    final bassBoost = getBand('bass') / 24.0;
-    final midBoost = getBand('mid') / 24.0;
-    final trebleBoost = getBand('treble') / 24.0;
-    final raw = 1.0 + bassBoost * 0.6 + midBoost * 0.4 + trebleBoost * 0.3;
+    if (bandCount == VirtualEqBandCount.three) {
+      final bassBoost = getBand('bass') / 24.0;
+      final midBoost = getBand('mid') / 24.0;
+      final trebleBoost = getBand('treble') / 24.0;
+      final raw = 1.0 + bassBoost * 0.6 + midBoost * 0.4 + trebleBoost * 0.3;
+      return raw.clamp(0.4, 1.6);
+    }
+    final keys = virtualBandKeysFor(bandCount);
+    var raw = 1.0;
+    for (var i = 0; i < keys.length; i++) {
+      raw += (getBand(keys[i]) / 24.0) * virtualBandWeight(i, keys.length);
+    }
     return raw.clamp(0.4, 1.6);
   }
 
@@ -336,15 +457,20 @@ class EqualizerPlugin extends MusicPlugin {
   /// virtual bands from whichever key [_resolveVirtualKey] currently
   /// resolves to — album/artist/device/default, in that precedence
   /// order — into [_virtualBands] and records it as [_activeVirtualKey].
-  /// Does not itself apply the resulting gain; callers that need the
-  /// audible effect to update immediately (see [_onDeviceChanged]/
-  /// [onTrackStart]) do that afterward.
+  /// Rebuilds [_virtualBands] wholesale against [bandCount]'s own key set
+  /// (via [virtualBandKeysFor]) rather than mutating the existing map in
+  /// place, so switching band count never leaves stale keys from a
+  /// differently-shaped profile behind. Does not itself apply the
+  /// resulting gain; callers that need the audible effect to update
+  /// immediately (see [_onDeviceChanged]/[onTrackStart]/[setBandCount])
+  /// do that afterward.
   void _loadVirtualBands() {
     _activeVirtualKey = _resolveVirtualKey();
     final saved = _readBandMap(_activeVirtualKey);
-    for (final key in virtualBandKeys) {
-      _virtualBands[key] = (saved[key] ?? 0.0).clamp(-12.0, 12.0);
-    }
+    _virtualBands = {
+      for (final key in virtualBandKeysFor(bandCount))
+        key: (saved[key] ?? 0.0).clamp(-12.0, 12.0),
+    };
   }
 
   /// Re-resolves and re-loads whichever profile now applies — the
@@ -553,6 +679,31 @@ class _EqualizerBandsEditorState extends State<_EqualizerBandsEditor> {
                   'equalizer, so bands only shape overall loudness.',
           style: theme.textTheme.bodySmall,
         ),
+        // Band count is a real device-provided fact in hardware mode —
+        // never user-selectable there, so this control is hidden
+        // entirely rather than shown-and-disabled.
+        if (!hardware) ...[
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Text('Bands', style: theme.textTheme.bodySmall),
+              const Spacer(),
+              SegmentedButton<VirtualEqBandCount>(
+                segments: const [
+                  ButtonSegment(value: VirtualEqBandCount.three, label: Text('3')),
+                  ButtonSegment(value: VirtualEqBandCount.five, label: Text('5')),
+                  ButtonSegment(value: VirtualEqBandCount.ten, label: Text('10')),
+                ],
+                selected: {plugin.bandCount},
+                onSelectionChanged: (selection) {
+                  // ignore: unawaited_futures
+                  plugin.setBandCount(selection.first);
+                  setState(() {});
+                },
+              ),
+            ],
+          ),
+        ],
         const SizedBox(height: 12),
         SizedBox(
           height: 220,
@@ -603,18 +754,24 @@ class _EqualizerBandsEditorState extends State<_EqualizerBandsEditor> {
   }
 
   Widget _buildVirtualBands(EqualizerPlugin plugin) {
+    final count = plugin.bandCount;
+    final keys = virtualBandKeysFor(count);
+    final frequencies = virtualBandCenterFrequencies(count);
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: EqualizerPlugin.virtualBandKeys.map((key) {
-        return _BandSlider(
-          label: _virtualLabels[key] ?? key,
-          value: plugin.getBand(key),
-          min: -12,
-          max: 12,
-          onChanged: (v) => setState(() => plugin.setBand(key, v)),
-          onChangeEnd: (_) => plugin.persistVirtualBands(),
-        );
-      }).toList(),
+      children: [
+        for (var i = 0; i < keys.length; i++)
+          _BandSlider(
+            label: count == VirtualEqBandCount.three
+                ? (_virtualLabels[keys[i]] ?? keys[i])
+                : _formatFrequency(frequencies[i]),
+            value: plugin.getBand(keys[i]),
+            min: -12,
+            max: 12,
+            onChanged: (v) => setState(() => plugin.setBand(keys[i], v)),
+            onChangeEnd: (_) => plugin.persistVirtualBands(),
+          ),
+      ],
     );
   }
 
