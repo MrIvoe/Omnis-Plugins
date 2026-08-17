@@ -45,6 +45,29 @@ const _deepCutsHitsFraction = 0.3;
 /// number drawn from an external spec.
 const _newReleasesWindowYears = 2;
 
+/// How many of a listener's top plays feed the "Daily Mix"/"Weekly Mix"
+/// familiar-tracks pool — same reasoning as
+/// [_forgottenFavoritesCandidatePool].
+const _familiarMixHistoryPoolSize = 200;
+
+/// A deterministic seed for "Daily Mix" — encodes the calendar date so
+/// the mix is identical for every call within the same day and different
+/// for any other day. Not cryptographic, not meant to be — just a
+/// stable, distinct integer per date.
+int dailyMixSeed(DateTime date) =>
+    date.year * 10000 + date.month * 100 + date.day;
+
+/// A deterministic seed for "Weekly Mix" — encodes the calendar year and
+/// a simple day-of-year/7 week bucket, not calendar-standard ISO 8601
+/// week numbering (no external spec names this feature; a tunable,
+/// documented simplification the same way [_newReleasesWindowYears] is,
+/// not drawn from a standard). Rotates every 7 days, resets cleanly each
+/// new year.
+int weeklyMixSeed(DateTime date) {
+  final dayOfYear = date.difference(DateTime(date.year, 1, 1)).inDays;
+  return date.year * 100 + (dayOfYear ~/ 7);
+}
+
 /// Curated queue presets built from objective, always-available track data
 /// (genre keywords, BPM) — deliberately independent of `BaseTrack.mood`,
 /// which only ever gets populated by opt-in enrichment/analysis/manual
@@ -78,6 +101,8 @@ class QueuePresetPlugin extends MusicPlugin implements IQueueBuilder {
     'Favorites Mix',
     'Deep Cuts',
     'New Releases',
+    'Daily Mix',
+    'Weekly Mix',
   ];
 
   @override
@@ -377,6 +402,91 @@ class QueuePresetPlugin extends MusicPlugin implements IQueueBuilder {
     return candidates.take(limit).toList();
   }
 
+  /// Shared candidate pool for "Daily Mix"/"Weekly Mix" — item 39's
+  /// "Daily/Weekly Mix" gap — tracks the listener has actually engaged
+  /// with: favorited tracks, other tracks by a favorited track's artist
+  /// (the same "favorite artist -> whole catalog" scoping [_buildDeepCuts]
+  /// already uses), and the listener's most-played-by-history tracks.
+  /// Deliberately an **OR** across [IFavoritesProvider]/
+  /// [IPlayHistoryProvider], not the **AND** [_buildDeepCuts]/
+  /// [_buildRediscover] require — those presets make a claim that
+  /// specifically needs both signals together (e.g. "loved but not
+  /// recently played"); "familiar" is satisfied by either signal alone,
+  /// and requiring both would falsely empty this preset for a listener
+  /// who has only used one of Favorites/history-tracking. Missing
+  /// *both* providers degrades to empty, the same standing contract
+  /// every sibling preset here already takes.
+  List<BaseTrack> _buildFamiliarMix(
+    List<BaseTrack> tracks, {
+    required int seed,
+    int limit = 50,
+  }) {
+    final favorites = context?.services.get<IFavoritesProvider>();
+    final history = context?.services.get<IPlayHistoryProvider>();
+    if (favorites == null && history == null) return const [];
+
+    final byId = {for (final t in tracks) t.id: t};
+    final candidateIds = <String>{};
+
+    if (favorites != null) {
+      final favoriteIds = favorites.favoriteIds().toSet();
+      final favoriteArtists = <String>{};
+      for (final id in favoriteIds) {
+        final track = byId[id];
+        if (track == null) continue;
+        candidateIds.add(id);
+        favoriteArtists.addAll(track.artists);
+      }
+      if (favoriteArtists.isNotEmpty) {
+        for (final t in tracks) {
+          if (t.artists.any(favoriteArtists.contains)) candidateIds.add(t.id);
+        }
+      }
+    }
+    if (history != null) {
+      for (final entry
+          in history.mostPlayedIds(limit: _familiarMixHistoryPoolSize)) {
+        if (byId.containsKey(entry.key)) candidateIds.add(entry.key);
+      }
+    }
+    if (candidateIds.isEmpty) return const [];
+
+    // Sort by id before shuffling so the pre-shuffle order — and
+    // therefore the seeded shuffle's output — never depends on Set
+    // iteration order (insertion order in practice, but not a
+    // documented guarantee worth relying on for something claiming
+    // day-stability).
+    final candidates = candidateIds.map((id) => byId[id]!).toList()
+      ..sort((a, b) => a.id.compareTo(b.id));
+    final shuffled = List<BaseTrack>.from(candidates)..shuffle(Random(seed));
+    return shuffled.take(limit).toList();
+  }
+
+  /// "Daily Mix" — item 39's "Daily/Weekly Mix" gap: a day-stable
+  /// shuffled sample of tracks the listener is actually familiar with.
+  /// Deliberately **no persisted "today's mix" state**: seeding the
+  /// shuffle from [dailyMixSeed] makes repeat calls on the same day
+  /// return identical output and the mix rotate on its own the moment
+  /// the date changes, without a new `PluginStorage` concept.
+  List<BaseTrack> _buildDailyMix(
+    List<BaseTrack> tracks, {
+    int limit = 50,
+    DateTime? now,
+  }) =>
+      _buildFamiliarMix(tracks,
+          seed: dailyMixSeed(now ?? DateTime.now()), limit: limit);
+
+  /// "Weekly Mix" — same pool/contract as [_buildDailyMix], seeded by
+  /// [weeklyMixSeed] instead so it stays stable for a full week before
+  /// rotating.
+  List<BaseTrack> _buildWeeklyMix(
+    List<BaseTrack> tracks, {
+    int limit = 50,
+    DateTime? now,
+  }) =>
+      _buildFamiliarMix(tracks,
+          seed: weeklyMixSeed(now ?? DateTime.now()), limit: limit);
+
   @override
   List<BaseTrack> buildQueueFor(List<BaseTrack> tracks, String query) {
     final normalized = query.toLowerCase();
@@ -394,6 +504,12 @@ class QueuePresetPlugin extends MusicPlugin implements IQueueBuilder {
     }
     if (normalized == 'new releases') {
       return _buildNewReleases(tracks);
+    }
+    if (normalized == 'daily mix') {
+      return _buildDailyMix(tracks);
+    }
+    if (normalized == 'weekly mix') {
+      return _buildWeeklyMix(tracks);
     }
     return buildQueue(tracks, query);
   }

@@ -169,7 +169,7 @@ void main() {
       expect(result, [matching]);
     });
 
-    test('supportedQueries lists exactly the nine presets, in order', () {
+    test('supportedQueries lists exactly the eleven presets, in order', () {
       final plugin = QueuePresetPlugin();
       expect(plugin.supportedQueries, [
         'Chill',
@@ -181,6 +181,8 @@ void main() {
         'Favorites Mix',
         'Deep Cuts',
         'New Releases',
+        'Daily Mix',
+        'Weekly Mix',
       ]);
     });
   });
@@ -561,6 +563,200 @@ void main() {
       final plugin = QueuePresetPlugin();
       final t1 = track(id: 't1', year: currentYear);
       expect(plugin.buildQueueFor([t1], 'new releases'), [t1]);
+    });
+  });
+
+  group('dailyMixSeed/weeklyMixSeed (item 39, Daily/Weekly Mix)', () {
+    test('dailyMixSeed is identical for two calls on the same date', () {
+      final date = DateTime(2026, 3, 15);
+      expect(dailyMixSeed(date), dailyMixSeed(DateTime(2026, 3, 15)));
+    });
+
+    test('dailyMixSeed differs for different days', () {
+      expect(dailyMixSeed(DateTime(2026, 3, 15)),
+          isNot(dailyMixSeed(DateTime(2026, 3, 16))));
+    });
+
+    test('weeklyMixSeed is identical for two days within the same week '
+        'bucket', () {
+      // Both fall in the same day-of-year/7 bucket (day 59 and 61 for a
+      // non-leap year both floor-divide to the same week number).
+      expect(weeklyMixSeed(DateTime(2026, 3, 1)),
+          weeklyMixSeed(DateTime(2026, 3, 3)));
+    });
+
+    test('weeklyMixSeed differs across a week boundary', () {
+      expect(weeklyMixSeed(DateTime(2026, 1, 1)),
+          isNot(weeklyMixSeed(DateTime(2026, 1, 10))));
+    });
+
+    test('a year boundary does not collide dailyMixSeed values', () {
+      expect(dailyMixSeed(DateTime(2025, 12, 31)),
+          isNot(dailyMixSeed(DateTime(2026, 1, 1))));
+    });
+
+    test('a year boundary does not collide weeklyMixSeed values', () {
+      expect(weeklyMixSeed(DateTime(2025, 12, 31)),
+          isNot(weeklyMixSeed(DateTime(2026, 1, 1))));
+    });
+  });
+
+  group('Daily Mix / Weekly Mix (item 39)', () {
+    test('no IFavoritesProvider and no IPlayHistoryProvider registered: '
+        'empty, no crash', () {
+      final plugin = QueuePresetPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+      expect(plugin.buildQueueFor([track(id: 't1')], 'Daily Mix'), isEmpty);
+      expect(plugin.buildQueueFor([track(id: 't1')], 'Weekly Mix'), isEmpty);
+    });
+
+    test('only IFavoritesProvider registered: a favorited track and its '
+        'artist\'s other tracks appear', () {
+      final plugin = QueuePresetPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+      ctx.servicesRegistry
+          .register(IFavoritesProvider, _FakeFavorites()..ids = ['fav1']);
+      final fav = track(id: 'fav1', artists: const ['Same Artist']);
+      final otherByArtist =
+          track(id: 'other1', artists: const ['Same Artist']);
+      final unrelated = track(id: 'unrelated', artists: const ['Someone Else']);
+
+      final result = plugin.buildQueueFor(
+        [fav, otherByArtist, unrelated],
+        'Daily Mix',
+      );
+
+      expect(result.map((t) => t.id).toSet(), {'fav1', 'other1'});
+    });
+
+    test('a favorited id no longer present in the current library is '
+        'silently dropped, not a broken entry', () {
+      final plugin = QueuePresetPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+      ctx.servicesRegistry
+          .register(IFavoritesProvider, _FakeFavorites()..ids = ['gone']);
+      expect(
+        plugin.buildQueueFor([track(id: 'unrelated')], 'Daily Mix'),
+        isEmpty,
+      );
+    });
+
+    test('only IPlayHistoryProvider registered: top-played tracks appear',
+        () {
+      final plugin = QueuePresetPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+      ctx.servicesRegistry.register(
+        IPlayHistoryProvider,
+        _FakeHistory()..mostPlayed = [const MapEntry('played1', 10)],
+      );
+      final played = track(id: 'played1');
+      final unrelated = track(id: 'unrelated');
+
+      final result = plugin.buildQueueFor([played, unrelated], 'Weekly Mix');
+
+      expect(result.map((t) => t.id).toSet(), {'played1'});
+    });
+
+    test('both providers registered, overlapping pools: a track that is '
+        'both favorited and top-played appears exactly once', () {
+      final plugin = QueuePresetPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+      ctx.servicesRegistry
+          .register(IFavoritesProvider, _FakeFavorites()..ids = ['t1']);
+      ctx.servicesRegistry.register(
+        IPlayHistoryProvider,
+        _FakeHistory()..mostPlayed = [const MapEntry('t1', 10)],
+      );
+      final overlapping = track(id: 't1');
+
+      final result = plugin.buildQueueFor([overlapping], 'Daily Mix');
+
+      expect(result, [overlapping]);
+    });
+
+    // buildQueueFor's public dispatch has no way to inject a fixed `now`
+    // (that parameter only exists on the private _buildDailyMix/
+    // _buildWeeklyMix/_buildFamiliarMix methods themselves) — the same
+    // constraint the New Releases entry's own tests already hit and
+    // resolved the same way: exercise real wall-clock stability (two
+    // calls within the same real test run necessarily share the same
+    // real calendar day/week) rather than hardcoding or injecting a
+    // date. "the seed actually varies by date" is already proven at the
+    // pure-function level by the dailyMixSeed/weeklyMixSeed group above,
+    // so it doesn't need re-proving through the full plugin stack too.
+    test('two Daily Mix calls on the same real day return identical '
+        'track order — the actual point of this feature', () {
+      final plugin = QueuePresetPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+      ctx.servicesRegistry.register(
+        IFavoritesProvider,
+        _FakeFavorites()..ids = ['t1', 't2', 't3', 't4', 't5'],
+      );
+      final tracks = List.generate(5, (i) => track(id: 't${i + 1}'));
+
+      final first = plugin.buildQueueFor([...tracks], 'Daily Mix');
+      final second = plugin.buildQueueFor([...tracks], 'Daily Mix');
+
+      expect(first.map((t) => t.id), second.map((t) => t.id));
+    });
+
+    test('two Weekly Mix calls on the same real day (necessarily the '
+        'same week) return identical track order', () {
+      final plugin = QueuePresetPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+      ctx.servicesRegistry.register(
+        IFavoritesProvider,
+        _FakeFavorites()..ids = ['t1', 't2', 't3', 't4', 't5'],
+      );
+      final tracks = List.generate(5, (i) => track(id: 't${i + 1}'));
+
+      final first = plugin.buildQueueFor([...tracks], 'Weekly Mix');
+      final second = plugin.buildQueueFor([...tracks], 'Weekly Mix');
+
+      expect(first.map((t) => t.id), second.map((t) => t.id));
+    });
+
+    test('result never exceeds the default limit of 50', () {
+      final plugin = QueuePresetPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+      final ids = List.generate(80, (i) => 't$i');
+      ctx.servicesRegistry.register(IFavoritesProvider, _FakeFavorites()..ids = ids);
+      final tracks = List.generate(80, (i) => track(id: 't$i'));
+
+      final result = plugin.buildQueueFor(tracks, 'Daily Mix');
+
+      expect(result.length, 50);
+    });
+
+    test('an empty tracks list returns empty without crashing', () {
+      final plugin = QueuePresetPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+      ctx.servicesRegistry
+          .register(IFavoritesProvider, _FakeFavorites()..ids = ['t1']);
+
+      expect(plugin.buildQueueFor(const [], 'Daily Mix'), isEmpty);
+    });
+
+    test('query matching is case-insensitive, same as every other preset '
+        'name here', () {
+      final plugin = QueuePresetPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+      ctx.servicesRegistry
+          .register(IFavoritesProvider, _FakeFavorites()..ids = ['t1']);
+      final t1 = track(id: 't1');
+
+      expect(plugin.buildQueueFor([t1], 'daily mix'), [t1]);
+      expect(plugin.buildQueueFor([t1], 'weekly mix'), [t1]);
     });
   });
 
