@@ -36,6 +36,15 @@ const _rediscoverRecentWindow = 30;
 /// competing on the same absolute play-count scale.
 const _deepCutsHitsFraction = 0.3;
 
+/// How many calendar years back from "now" still count as a "New
+/// Release" for the [QueuePresetPlugin.presets] preset of that name —
+/// generous enough that metadata carrying only a bare [BaseTrack.year]
+/// (not a full [BaseTrack.releaseDate]) still qualifies, and that the
+/// preset doesn't go empty the moment a calendar year rolls over on an
+/// album released only a few months ago. A tunable starting point, not a
+/// number drawn from an external spec.
+const _newReleasesWindowYears = 2;
+
 /// Curated queue presets built from objective, always-available track data
 /// (genre keywords, BPM) — deliberately independent of `BaseTrack.mood`,
 /// which only ever gets populated by opt-in enrichment/analysis/manual
@@ -68,6 +77,7 @@ class QueuePresetPlugin extends MusicPlugin implements IQueueBuilder {
     'Rediscover',
     'Favorites Mix',
     'Deep Cuts',
+    'New Releases',
   ];
 
   @override
@@ -320,6 +330,53 @@ class QueuePresetPlugin extends MusicPlugin implements IQueueBuilder {
     return shuffled.take(limit).toList();
   }
 
+  /// "New Releases" — spec §36's Discovery Engine "Play Something" list's
+  /// "New" button, and the last of item 39's four Deep-Cuts-era named
+  /// gaps closeable without a new capability interface: pure
+  /// [BaseTrack.releaseDate]/[BaseTrack.year] data, already populated by
+  /// real scanning/tagging elsewhere in this app. A genuinely distinct
+  /// claim from the main app's "Recently Added" home section (which reads
+  /// [BaseTrack.dateAdded], explicitly documented there as "not the
+  /// release date") — this preset means "the music itself is new," not
+  /// "this listener's copy of it is new."
+  ///
+  /// Deliberately **sorted newest-first, not shuffled**, unlike every
+  /// sibling preset above — for "New Releases," recency order *is* the
+  /// claim being made, not incidental to it. Needs no
+  /// `context?.services.get<...>()` lookup at all, unlike every
+  /// history/rating/favorites-driven preset here — this is closer in
+  /// spirit to [matchesPreset]'s BPM/genre matching, just keyed on
+  /// release date instead. Falls back to [BaseTrack.year] only when
+  /// [BaseTrack.releaseDate] is absent (year-only metadata still
+  /// qualifies); a track with neither is excluded, and an empty result —
+  /// not [buildQueue]'s whole-library shuffle fallback — is returned when
+  /// nothing in the library qualifies, the same "don't substitute a
+  /// misleading claim" stance every sibling preset already takes.
+  List<BaseTrack> _buildNewReleases(
+    List<BaseTrack> tracks, {
+    int limit = 50,
+    DateTime? now,
+  }) {
+    final effectiveNow = now ?? DateTime.now();
+    final cutoffYear = effectiveNow.year - _newReleasesWindowYears;
+    final candidates = tracks.where((t) {
+      final year = t.releaseDate?.year ?? t.year;
+      return year != null && year >= cutoffYear;
+    }).toList();
+    if (candidates.isEmpty) return const [];
+    candidates.sort((a, b) {
+      final aYear = a.releaseDate?.year ?? a.year!;
+      final bYear = b.releaseDate?.year ?? b.year!;
+      if (aYear != bYear) return bYear.compareTo(aYear);
+      final aDate = a.releaseDate;
+      final bDate = b.releaseDate;
+      if (aDate != null && bDate != null) return bDate.compareTo(aDate);
+      if ((aDate == null) != (bDate == null)) return aDate == null ? 1 : -1;
+      return a.title.toLowerCase().compareTo(b.title.toLowerCase());
+    });
+    return candidates.take(limit).toList();
+  }
+
   @override
   List<BaseTrack> buildQueueFor(List<BaseTrack> tracks, String query) {
     final normalized = query.toLowerCase();
@@ -334,6 +391,9 @@ class QueuePresetPlugin extends MusicPlugin implements IQueueBuilder {
     }
     if (normalized == 'deep cuts') {
       return _buildDeepCuts(tracks);
+    }
+    if (normalized == 'new releases') {
+      return _buildNewReleases(tracks);
     }
     return buildQueue(tracks, query);
   }

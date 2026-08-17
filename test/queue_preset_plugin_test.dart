@@ -73,6 +73,8 @@ void main() {
     List<String> genres = const [],
     double? bpm,
     List<String> artists = const ['Artist'],
+    int? year,
+    DateTime? releaseDate,
   }) =>
       BaseTrack(
         id: id,
@@ -83,6 +85,8 @@ void main() {
         type: TrackType.local,
         genres: genres,
         bpm: bpm,
+        year: year,
+        releaseDate: releaseDate,
       );
 
   group('matchesPreset', () {
@@ -165,7 +169,7 @@ void main() {
       expect(result, [matching]);
     });
 
-    test('supportedQueries lists exactly the eight presets, in order', () {
+    test('supportedQueries lists exactly the nine presets, in order', () {
       final plugin = QueuePresetPlugin();
       expect(plugin.supportedQueries, [
         'Chill',
@@ -176,6 +180,7 @@ void main() {
         'Rediscover',
         'Favorites Mix',
         'Deep Cuts',
+        'New Releases',
       ]);
     });
   });
@@ -470,6 +475,92 @@ void main() {
           ],
       );
       expect(plugin.buildQueueFor([hit, deep], 'deep cuts'), [deep]);
+    });
+  });
+
+  group('New Releases', () {
+    // Every year is expressed relative to the real wall-clock "now" — the
+    // preset's own cutoff is DateTime.now().year - 2, and buildQueueFor's
+    // dispatch has no way to inject a fixed `now` (that parameter only
+    // exists on the private _buildNewReleases method itself, unreachable
+    // through the public IQueueBuilder-facing entry point) — so a
+    // hardcoded absolute year here would silently start failing as real
+    // time passes rather than testing the boundary logic itself.
+    final currentYear = DateTime.now().year;
+    final cutoffYear = currentYear - 2;
+
+    test('no track has year or releaseDate at all: empty, not the '
+        'whole-library shuffle fallback', () {
+      final plugin = QueuePresetPlugin();
+      final t1 = track(id: 't1');
+      expect(
+        plugin.buildQueueFor([t1], 'New Releases'),
+        isEmpty,
+      );
+    });
+
+    test('a track with releaseDate inside the window is included; one '
+        'many years old is excluded', () {
+      final plugin = QueuePresetPlugin();
+      final recent =
+          track(id: 'recent', releaseDate: DateTime(currentYear, 1, 1));
+      final old = track(id: 'old', releaseDate: DateTime(2010, 1, 1));
+      final dispatched = plugin.buildQueueFor([recent, old], 'New Releases');
+      expect(dispatched, [recent]);
+    });
+
+    test('a track with only year set (no releaseDate) still counts', () {
+      final plugin = QueuePresetPlugin();
+      final t1 = track(id: 't1', year: currentYear);
+      expect(plugin.buildQueueFor([t1], 'New Releases'), [t1]);
+    });
+
+    test('exactly at the cutoff year is included; one year older is '
+        'excluded — >=, not >', () {
+      final plugin = QueuePresetPlugin();
+      final atCutoff = track(id: 'at_cutoff', year: cutoffYear);
+      final justOlder = track(id: 'just_older', year: cutoffYear - 1);
+      final result = plugin.buildQueueFor(
+        [atCutoff, justOlder],
+        'New Releases',
+      );
+      expect(result, [atCutoff]);
+    });
+
+    test('results sort newest-first by year', () {
+      final plugin = QueuePresetPlugin();
+      final oldest = track(id: 'oldest', year: cutoffYear);
+      final newest = track(id: 'newest', year: currentYear);
+      final middle = track(id: 'middle', year: currentYear - 1);
+      final result = plugin.buildQueueFor(
+        [oldest, newest, middle],
+        'New Releases',
+      );
+      expect(result, [newest, middle, oldest]);
+    });
+
+    test('two tracks sharing a year sort alphabetically by title as a '
+        'deterministic tie-break', () {
+      final plugin = QueuePresetPlugin();
+      final b = track(id: 'b', year: currentYear);
+      final a = track(id: 'a', year: currentYear);
+      final result = plugin.buildQueueFor([b, a], 'New Releases');
+      expect(result, [a, b]);
+    });
+
+    test('result never exceeds the default limit of 50', () {
+      final plugin = QueuePresetPlugin();
+      final tracks =
+          List.generate(80, (i) => track(id: 't$i', year: currentYear));
+      final result = plugin.buildQueueFor(tracks, 'New Releases');
+      expect(result.length, 50);
+    });
+
+    test('query matching is case-insensitive, same as every other preset '
+        'name here', () {
+      final plugin = QueuePresetPlugin();
+      final t1 = track(id: 't1', year: currentYear);
+      expect(plugin.buildQueueFor([t1], 'new releases'), [t1]);
     });
   });
 
