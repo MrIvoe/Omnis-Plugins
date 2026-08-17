@@ -6,12 +6,17 @@ import 'package:omnis_plugin_api/base_track.dart';
 import 'package:omnis_plugin_api/plugin_interface.dart';
 import 'package:omnis_plugin_api/service_interfaces.dart';
 
-/// The first real slice of the spec's §21 "AI subsystem" — natural
-/// language playlist creation ("make me a two-hour workout playlist"),
-/// backed by a real cloud LLM (Anthropic's Messages API) using a
-/// user-supplied API key, matching the same "user brings their own
-/// credential" pattern `MetadataEnrichmentPlugin`'s Last.fm/Discogs keys
-/// already established — this app ships no embedded key of its own.
+/// The first two real slices of the spec's §21 "AI subsystem" — natural
+/// language playlist creation ("make me a two-hour workout playlist")
+/// and natural language *search* ("upbeat songs from the 90s I haven't
+/// played in a while" — item 43's own named gap), both backed by a real
+/// cloud LLM (Anthropic's Messages API) using a user-supplied API key,
+/// matching the same "user brings their own credential" pattern
+/// `MetadataEnrichmentPlugin`'s Last.fm/Discogs keys already
+/// established — this app ships no embedded key of its own. The two
+/// differ only in what's asked of the model (a curated listening order
+/// vs. an unordered set of genuine matches) — see [_queryModel], the
+/// shared request/response machinery both build on.
 ///
 /// The model never invents tracks: it's given a compact JSON summary of
 /// the real library (id/title/artist/genres/mood/bpm/duration for each
@@ -77,6 +82,67 @@ class AIPlaylistPlugin extends MusicPlugin implements IAIProvider {
       return const [];
     }
 
+    return _queryModel(
+      library: library,
+      systemPrompt: 'You are a music playlist assistant for a local '
+          'music library. You will be given a JSON array of '
+          'tracks (each with an "id") and a listener\'s request. '
+          'Reply with ONLY a JSON array of the "id" strings of '
+          'tracks from the given list that best fit the request, '
+          'in a good listening order, and nothing else — no '
+          'prose, no markdown, no explanation. Only use ids that '
+          'appear in the given list; never invent one.',
+      userMessagePrefix: 'Request: $trimmedPrompt',
+    );
+  }
+
+  @override
+  Future<List<BaseTrack>> searchLibrary(
+    String query,
+    List<BaseTrack> library,
+  ) async {
+    final trimmedQuery = query.trim();
+    if (trimmedQuery.isEmpty) return const [];
+    if (!isAvailable) {
+      lastError = 'No Anthropic API key configured.';
+      return const [];
+    }
+    if (library.isEmpty) {
+      lastError = 'Your library is empty — nothing to search.';
+      return const [];
+    }
+
+    return _queryModel(
+      library: library,
+      systemPrompt: 'You are a natural-language search assistant for a '
+          'local music library. You will be given a JSON array of '
+          'tracks (each with an "id") and a listener\'s search query — '
+          'which may describe mood, genre, era, tempo, or listening '
+          'history, not just literal title/artist text. Reply with '
+          'ONLY a JSON array of the "id" strings of tracks from the '
+          'given list that genuinely match the query — order does not '
+          'matter, and nothing else — no prose, no markdown, no '
+          'explanation. Only use ids that appear in the given list; '
+          'never invent one. If nothing matches, reply with an empty '
+          'JSON array.',
+      userMessagePrefix: 'Search: $trimmedQuery',
+    );
+  }
+
+  /// Shared by [buildPlaylistFromPrompt]/[searchLibrary] — both send a
+  /// capped, real-fields-only sample of [library] plus a task-specific
+  /// [systemPrompt]/[userMessagePrefix] to the same Anthropic Messages
+  /// API, and both need the identical response handling: a non-200
+  /// status, an unparseable envelope, a markdown-fenced reply, and (the
+  /// "never invents a track" guarantee) filtering the model's returned
+  /// ids down to only ones that actually exist in the sample it was
+  /// shown. Only the *reason* for the request differs between the two
+  /// callers, not how the request/response is handled.
+  Future<List<BaseTrack>> _queryModel({
+    required List<BaseTrack> library,
+    required String systemPrompt,
+    required String userMessagePrefix,
+  }) async {
     final sample = library.take(_maxLibrarySample).toList();
     final byId = {for (final t in sample) t.id: t};
     final catalog = sample
@@ -103,18 +169,11 @@ class AIPlaylistPlugin extends MusicPlugin implements IAIProvider {
             body: jsonEncode({
               'model': model,
               'max_tokens': 1024,
-              'system': 'You are a music playlist assistant for a local '
-                  'music library. You will be given a JSON array of '
-                  'tracks (each with an "id") and a listener\'s request. '
-                  'Reply with ONLY a JSON array of the "id" strings of '
-                  'tracks from the given list that best fit the request, '
-                  'in a good listening order, and nothing else — no '
-                  'prose, no markdown, no explanation. Only use ids that '
-                  'appear in the given list; never invent one.',
+              'system': systemPrompt,
               'messages': [
                 {
                   'role': 'user',
-                  'content': 'Request: $trimmedPrompt\n\n'
+                  'content': '$userMessagePrefix\n\n'
                       'Tracks: ${jsonEncode(catalog)}',
                 }
               ],
@@ -199,12 +258,12 @@ class AIPlaylistPlugin extends MusicPlugin implements IAIProvider {
   String get id => 'ai_playlist';
 
   @override
-  String get name => 'AI Playlists';
+  String get name => 'AI Playlists & Search';
 
   @override
   String get description =>
-      'Describe a playlist in plain language and build it from your '
-      'real library, using your own Anthropic API key.';
+      'Describe a playlist or search your library in plain language, '
+      'using your own Anthropic API key.';
 
   @override
   String get version => '1.0.0';
@@ -259,9 +318,13 @@ class _AIPlaylistSettingsState extends State<_AIPlaylistSettings> {
   late final TextEditingController _apiKeyController;
   late final TextEditingController _modelController;
   final _promptController = TextEditingController();
+  final _searchController = TextEditingController();
 
   bool _generating = false;
   List<BaseTrack> _results = const [];
+
+  bool _searching = false;
+  List<BaseTrack> _searchResults = const [];
 
   @override
   void initState() {
@@ -275,6 +338,7 @@ class _AIPlaylistSettingsState extends State<_AIPlaylistSettings> {
     _apiKeyController.dispose();
     _modelController.dispose();
     _promptController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -301,6 +365,36 @@ class _AIPlaylistSettingsState extends State<_AIPlaylistSettings> {
     final pluginContext = widget.plugin.context;
     if (pluginContext == null || _results.isEmpty) return;
     await pluginContext.setQueue(_results, startIndex: 0);
+    await pluginContext.play();
+  }
+
+  /// Item 43's "natural language search" gap — a separate action/result
+  /// set from [_generate]/[_results]: a search finds matches, it doesn't
+  /// build a curated listening order, so it gets its own "Play" (queues
+  /// whatever matched, in whatever order the model returned) rather
+  /// than being folded into the playlist-generation flow above.
+  Future<void> _search() async {
+    final query = _searchController.text;
+    if (query.trim().isEmpty) return;
+    await widget.plugin.setApiKey(_apiKeyController.text);
+    await widget.plugin.setModel(_modelController.text);
+
+    final pluginContext = widget.plugin.context;
+    if (pluginContext == null) return;
+    setState(() => _searching = true);
+    final library = await pluginContext.loadLibraryTracks();
+    final results = await widget.plugin.searchLibrary(query, library);
+    if (!mounted) return;
+    setState(() {
+      _searchResults = results;
+      _searching = false;
+    });
+  }
+
+  Future<void> _playSearchResults() async {
+    final pluginContext = widget.plugin.context;
+    if (pluginContext == null || _searchResults.isEmpty) return;
+    await pluginContext.setQueue(_searchResults, startIndex: 0);
     await pluginContext.play();
   }
 
@@ -379,6 +473,58 @@ class _AIPlaylistSettingsState extends State<_AIPlaylistSettings> {
             ],
           ),
           for (final track in _results)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.music_note),
+              title: Text(track.title),
+              subtitle: Text(track.artists.join(', ')),
+            ),
+        ],
+        const SizedBox(height: 20),
+        Text('Search your library', style: theme.textTheme.titleSmall),
+        const SizedBox(height: 4),
+        Text(
+          'Describe what you\'re looking for — mood, genre, era, tempo, '
+          'not just exact title/artist text.',
+          style: theme.textTheme.bodySmall,
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _searchController,
+          maxLines: 2,
+          decoration: const InputDecoration(
+            labelText: 'e.g. "upbeat 90s songs I haven\'t played in a while"',
+            border: OutlineInputBorder(),
+            prefixIcon: Icon(Icons.search),
+          ),
+        ),
+        const SizedBox(height: 8),
+        FilledButton.icon(
+          onPressed: _searching ? null : _search,
+          icon: _searching
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.search),
+          label: Text(_searching ? 'Searching…' : 'Search'),
+        ),
+        if (_searchResults.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Text('${_searchResults.length} match(es)',
+                  style: theme.textTheme.titleSmall),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: _playSearchResults,
+                icon: const Icon(Icons.play_arrow),
+                label: const Text('Play'),
+              ),
+            ],
+          ),
+          for (final track in _searchResults)
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.music_note),

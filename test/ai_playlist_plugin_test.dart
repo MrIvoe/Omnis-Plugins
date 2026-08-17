@@ -272,6 +272,117 @@ void main() {
     });
   });
 
+  group('searchLibrary (item 43, natural language search)', () {
+    test('returns an empty list without calling the network for a blank '
+        'query', () async {
+      var called = false;
+      final plugin = await configuredPlugin(
+        client: MockClient((req) async {
+          called = true;
+          return http.Response(anthropicOkBody('[]'), 200);
+        }),
+      );
+
+      final result = await plugin.searchLibrary('   ', [track('t1')]);
+
+      expect(result, isEmpty);
+      expect(called, isFalse);
+    });
+
+    test('returns an empty list with lastError when no API key is '
+        'configured, without calling the network', () async {
+      var called = false;
+      final plugin = AIPlaylistPlugin(client: MockClient((req) async {
+        called = true;
+        return http.Response(anthropicOkBody('[]'), 200);
+      }));
+
+      final result =
+          await plugin.searchLibrary('upbeat 90s songs', [track('t1')]);
+
+      expect(result, isEmpty);
+      expect(called, isFalse);
+      expect(plugin.lastError, isNotNull);
+    });
+
+    test('returns an empty list with lastError for an empty library, '
+        'without calling the network', () async {
+      var called = false;
+      final plugin = await configuredPlugin(
+        client: MockClient((req) async {
+          called = true;
+          return http.Response(anthropicOkBody('[]'), 200);
+        }),
+      );
+
+      final result =
+          await plugin.searchLibrary('upbeat 90s songs', const []);
+
+      expect(result, isEmpty);
+      expect(called, isFalse);
+      expect(plugin.lastError, isNotNull);
+    });
+
+    test('sends the search query (not a playlist-building instruction) '
+        'in the request, reusing the same real Anthropic Messages API '
+        'shape', () async {
+      Uri? capturedUri;
+      Map<String, dynamic>? capturedBody;
+      final plugin = await configuredPlugin(
+        client: MockClient((req) async {
+          capturedUri = req.url;
+          capturedBody = jsonDecode(req.body) as Map<String, dynamic>;
+          return http.Response(anthropicOkBody('["t1"]'), 200);
+        }),
+      );
+
+      await plugin.searchLibrary(
+        'upbeat 90s songs I haven\'t played in a while',
+        [track('t1', title: 'Groove')],
+      );
+
+      expect(capturedUri!.host, 'api.anthropic.com');
+      expect(capturedUri!.path, '/v1/messages');
+      final userContent = (capturedBody!['messages'] as List).first['content'];
+      expect(userContent,
+          contains('upbeat 90s songs I haven\'t played in a while'));
+      expect(userContent, contains('Groove'));
+      // The system prompt is search-specific, not the playlist-building
+      // one — proves searchLibrary isn't accidentally reusing
+      // buildPlaylistFromPrompt's own instruction text verbatim.
+      expect(capturedBody!['system'], contains('search'));
+      expect(capturedBody!['system'], isNot(contains('listening order')));
+    });
+
+    test('maps returned ids back to real BaseTracks and never invents '
+        'one not in the library', () async {
+      final plugin = await configuredPlugin(
+        client: MockClient((req) async =>
+            http.Response(anthropicOkBody('["t1", "made-up-id"]'), 200)),
+      );
+
+      final result =
+          await plugin.searchLibrary('rock songs', [track('t1')]);
+
+      expect(result, hasLength(1));
+      expect(result.single.id, 't1');
+    });
+
+    test('an empty match array is a valid, successful result — no error, '
+        'just nothing found', () async {
+      final plugin = await configuredPlugin(
+        client: MockClient((req) async =>
+            http.Response(anthropicOkBody('[]'), 200)),
+      );
+
+      final result =
+          await plugin.searchLibrary('polka accordion solos', [track('t1')]);
+
+      expect(result, isEmpty);
+      expect(plugin.lastError, isNull);
+    });
+  });
+
   test('plugin metadata is well-formed', () {
     final plugin = AIPlaylistPlugin();
     expect(plugin.id, 'ai_playlist');
