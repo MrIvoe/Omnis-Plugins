@@ -132,6 +132,51 @@ void main() {
     test('an empty string produces an empty list', () {
       expect(parseLrc(''), isEmpty);
     });
+
+    group('enhanced LRC (inline per-word timestamps)', () {
+      test('a line with inline word tags populates wordTimings and joins '
+          'their text for the plain-text fallback', () {
+        final lines = parseLrc(
+            '[00:12.00]<00:12.00>Hello <00:12.50>there <00:13.00>world');
+
+        expect(lines, hasLength(1));
+        final line = lines.single;
+        expect(line.text, 'Hello there world');
+        expect(line.wordTimings, isNotNull);
+        expect(line.wordTimings!.map((t) => t.$2), ['Hello', 'there', 'world']);
+        expect(line.wordTimings![0].$1, const Duration(seconds: 12));
+        expect(line.wordTimings![1].$1,
+            const Duration(seconds: 12, milliseconds: 500));
+        expect(line.wordTimings![2].$1, const Duration(seconds: 13));
+      });
+
+      test('a plain (non-enhanced) line leaves wordTimings null, exactly '
+          'as before this format was recognized', () {
+        final lines = parseLrc('[00:12.00]Hello there world');
+
+        expect(lines.single.wordTimings, isNull);
+        expect(lines.single.text, 'Hello there world');
+      });
+
+      test('multiple line-level timestamps sharing one enhanced line each '
+          'get their own entry, all carrying the same wordTimings', () {
+        final lines =
+            parseLrc('[00:10.00][00:40.00]<00:10.00>La <00:10.30>la');
+
+        expect(lines, hasLength(2));
+        expect(lines[0].text, 'La la');
+        expect(lines[1].text, 'La la');
+        expect(lines[0].wordTimings, lines[1].wordTimings);
+      });
+
+      test('an empty word between two adjacent word tags is dropped, not '
+          'kept as a blank entry', () {
+        final lines =
+            parseLrc('[00:10.00]<00:10.00><00:10.10>Real <00:10.50>word');
+
+        expect(lines.single.wordTimings!.map((t) => t.$2), ['Real', 'word']);
+      });
+    });
   });
 
   group('currentLyricFor', () {
@@ -460,6 +505,77 @@ void main() {
       await plugin.onTrackStart(track('t1'));
 
       expect(called, isTrue);
+    });
+  });
+
+  group('syncedLyricsFor', () {
+    test('returns null, not an empty list, when nothing timed is stored',
+        () {
+      final plugin = LyricsPlugin();
+
+      expect(plugin.syncedLyricsFor(track('t1')), isNull);
+    });
+
+    test('returns the exact lines set via setTimedLyric, in order', () {
+      final plugin = LyricsPlugin();
+      final t = track('t1');
+      final lines = [
+        const LyricLine(timestamp: Duration(seconds: 10), text: 'First line'),
+        const LyricLine(timestamp: Duration(seconds: 20), text: 'Second line'),
+      ];
+      plugin.setTimedLyric(t.id, lines);
+
+      expect(plugin.syncedLyricsFor(t), lines);
+    });
+
+    test('a plain-only lyric (no timed lines) still returns null', () {
+      final plugin = LyricsPlugin();
+      final t = track('t1');
+      plugin.setLyric(t.id, 'Plain text only');
+
+      expect(plugin.syncedLyricsFor(t), isNull);
+    });
+  });
+
+  group('ISyncedLyricsProvider lifecycle', () {
+    test('initialize registers both interfaces; dispose unregisters both',
+        () async {
+      final plugin = LyricsPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+
+      expect(ctx.servicesRegistry.has<ILyricsProvider>(), isFalse);
+      expect(ctx.servicesRegistry.has<ISyncedLyricsProvider>(), isFalse);
+
+      await plugin.initialize();
+
+      expect(ctx.servicesRegistry.has<ILyricsProvider>(), isTrue);
+      expect(ctx.servicesRegistry.get<ILyricsProvider>(), same(plugin));
+      expect(ctx.servicesRegistry.has<ISyncedLyricsProvider>(), isTrue);
+      expect(ctx.servicesRegistry.get<ISyncedLyricsProvider>(), same(plugin));
+
+      await plugin.dispose();
+
+      expect(ctx.servicesRegistry.has<ILyricsProvider>(), isFalse);
+      expect(ctx.servicesRegistry.has<ISyncedLyricsProvider>(), isFalse);
+    });
+
+    test('disable unregisters both; enable re-registers both', () async {
+      final plugin = LyricsPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+
+      await plugin.enable();
+      expect(ctx.servicesRegistry.has<ILyricsProvider>(), isTrue);
+      expect(ctx.servicesRegistry.has<ISyncedLyricsProvider>(), isTrue);
+
+      await plugin.disable();
+      expect(ctx.servicesRegistry.has<ILyricsProvider>(), isFalse);
+      expect(ctx.servicesRegistry.has<ISyncedLyricsProvider>(), isFalse);
+
+      await plugin.enable();
+      expect(ctx.servicesRegistry.has<ILyricsProvider>(), isTrue);
+      expect(ctx.servicesRegistry.has<ISyncedLyricsProvider>(), isTrue);
     });
   });
 }

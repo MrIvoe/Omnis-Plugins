@@ -3,15 +3,11 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:omnis_plugin_api/base_track.dart';
+import 'package:omnis_plugin_api/lyric_line.dart';
 import 'package:omnis_plugin_api/plugin_interface.dart';
 import 'package:omnis_plugin_api/service_interfaces.dart';
 
-class LyricLine {
-  const LyricLine({required this.timestamp, required this.text});
-
-  final Duration timestamp;
-  final String text;
-}
+export 'package:omnis_plugin_api/lyric_line.dart';
 
 /// Where auto-fetched lyrics come from. Deliberately an enum with one
 /// real entry today rather than a free-text field or a `ServiceRegistry`
@@ -49,27 +45,69 @@ class LyricsFetchResult {
       syncedLyrics.isEmpty;
 }
 
+/// A bare `mm:ss` or `mm:ss.xxx` timestamp, without the surrounding
+/// `[...]`/`<...>` bracket — shared by [parseLrc]'s line-level `[...]`
+/// tags and enhanced-LRC's inline `<...>` per-word tags, which use the
+/// identical digit grouping.
+Duration _parseLrcTimestamp(RegExpMatch m) {
+  final minutes = int.parse(m.group(1)!);
+  final seconds = int.parse(m.group(2)!);
+  final fraction = m.group(3);
+  final millis = fraction == null ? 0 : int.parse(fraction.padRight(3, '0'));
+  return Duration(minutes: minutes, seconds: seconds, milliseconds: millis);
+}
+
+final _wordTimingPattern = RegExp(r'<(\d{2}):(\d{2})(?:\.(\d{1,3}))?>');
+
 /// Parses LRC-format synced lyrics (`[mm:ss.xx]text` per line, optionally
 /// several timestamps on one line) into [LyricLine]s. Metadata lines
 /// (`[ar:Artist]`, `[ti:Title]`, ...) don't match the digit-timestamp
 /// pattern and are silently skipped, not misparsed.
+///
+/// Also recognizes lrclib.net's "enhanced" LRC format, which nests
+/// per-word timestamps inside the line itself (e.g.
+/// `[00:12.34]<00:12.34>Hello <00:12.89>world`) — when present, populates
+/// [LyricLine.wordTimings] with each word's own start time, for
+/// word-level karaoke highlighting; a plain (non-enhanced) line leaves
+/// [LyricLine.wordTimings] `null`, exactly as before this format was
+/// recognized.
 List<LyricLine> parseLrc(String lrc) {
   final pattern = RegExp(r'\[(\d{2}):(\d{2})(?:\.(\d{1,3}))?\]');
   final lines = <LyricLine>[];
   for (final rawLine in lrc.split('\n')) {
     final matches = pattern.allMatches(rawLine).toList();
     if (matches.isEmpty) continue;
-    final text = rawLine.substring(matches.last.end).trim();
+    final rest = rawLine.substring(matches.last.end);
+
+    final wordMatches = _wordTimingPattern.allMatches(rest).toList();
+    String text;
+    List<(Duration, String)>? wordTimings;
+    if (wordMatches.isEmpty) {
+      text = rest.trim();
+      wordTimings = null;
+    } else {
+      final timings = <(Duration, String)>[];
+      for (var i = 0; i < wordMatches.length; i++) {
+        final wm = wordMatches[i];
+        final wordEnd = i + 1 < wordMatches.length
+            ? wordMatches[i + 1].start
+            : rest.length;
+        final word = rest.substring(wm.end, wordEnd).trim();
+        if (word.isEmpty) continue;
+        timings.add((_parseLrcTimestamp(wm), word));
+      }
+      wordTimings = timings.isEmpty ? null : timings;
+      text = (wordTimings ?? const <(Duration, String)>[])
+          .map((t) => t.$2)
+          .join(' ');
+    }
     if (text.isEmpty) continue;
+
     for (final m in matches) {
-      final minutes = int.parse(m.group(1)!);
-      final seconds = int.parse(m.group(2)!);
-      final fraction = m.group(3);
-      final millis = fraction == null ? 0 : int.parse(fraction.padRight(3, '0'));
       lines.add(LyricLine(
-        timestamp:
-            Duration(minutes: minutes, seconds: seconds, milliseconds: millis),
+        timestamp: _parseLrcTimestamp(m),
         text: text,
+        wordTimings: wordTimings,
       ));
     }
   }
@@ -99,7 +137,15 @@ List<LyricLine> parseLrc(String lrc) {
 /// alongside or instead of it. Editing lyrics is a capability specific to
 /// this plugin's own storage format, not part of the generic interface,
 /// so [LyricEditDialog] still takes the concrete `LyricsPlugin`.
-class LyricsPlugin extends MusicPlugin implements ILyricsProvider {
+///
+/// Also implements [ISyncedLyricsProvider] (a separate interface from
+/// [ILyricsProvider] by design — see that interface's own doc comment in
+/// `omnis_plugin_api`), exposing [timedLyricFor]'s already-existing full
+/// line list through [syncedLyricsFor] so the Now Playing lyrics panel and
+/// Karaoke Gestures layout can render every synced line at once instead of
+/// only the current one.
+class LyricsPlugin extends MusicPlugin
+    implements ILyricsProvider, ISyncedLyricsProvider {
   static const _autoFetchKey = 'auto_fetch_enabled';
   static const _writeToMetadataKey = 'write_to_metadata';
   static const _sourceKey = 'source';
@@ -315,6 +361,17 @@ class LyricsPlugin extends MusicPlugin implements ILyricsProvider {
     return lyricFor(track) ?? 'No lyrics added for this track yet.';
   }
 
+  /// The full ordered list of time-synced lines for [track], or `null`
+  /// when nothing timed is stored — see [ISyncedLyricsProvider]'s own doc
+  /// for why `null` (not empty) is the "nothing synced" signal a caller
+  /// checks. [timedLyricFor] already returns `[]` for "nothing stored,"
+  /// so this only needs the empty-to-null translation.
+  @override
+  List<LyricLine>? syncedLyricsFor(BaseTrack track) {
+    final lines = timedLyricFor(track);
+    return lines.isEmpty ? null : lines;
+  }
+
   @override
   String get id => 'lyrics';
 
@@ -339,16 +396,19 @@ class LyricsPlugin extends MusicPlugin implements ILyricsProvider {
       ..clear()
       ..addAll(_readStoredLyrics());
     context?.services.register(ILyricsProvider, this);
+    context?.services.register(ISyncedLyricsProvider, this);
   }
 
   @override
   Future<void> enable() async {
     context?.services.register(ILyricsProvider, this);
+    context?.services.register(ISyncedLyricsProvider, this);
   }
 
   @override
   Future<void> disable() async {
     context?.services.unregister(ILyricsProvider, this);
+    context?.services.unregister(ISyncedLyricsProvider, this);
   }
 
   @override
@@ -367,6 +427,7 @@ class LyricsPlugin extends MusicPlugin implements ILyricsProvider {
   @override
   Future<void> dispose() async {
     context?.services.unregister(ILyricsProvider, this);
+    context?.services.unregister(ISyncedLyricsProvider, this);
     _client.close();
   }
 }
