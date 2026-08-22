@@ -79,6 +79,18 @@ If a plugin idea needs any of the disallowed capabilities, it belongs
 in the **bundled** system (`lib/`) instead — see this repo's
 [CONTRIBUTING.md](../CONTRIBUTING.md).
 
+Beyond the static UI badge, a plugin can also reach back into the app
+for real capabilities — reading/controlling playback, editing the
+queue, volume/gain, a small persistent key-value store, and announcing
+events — each gated by declaring the matching permission. See the main
+repo's
+[docs/PLUGIN_GUIDE.md](https://github.com/MrIvoe/Omnis/blob/main/docs/PLUGIN_GUIDE.md#reaching-back-into-the-app-the-sandbox-bridge)
+for the full function/permission table, and **read its "real dart_eval
+gotcha" callout before writing an `async` hook that calls any of
+them** — passing a bare literal (`'one'`, `{...}`, `[]`) to a bridge
+function from `async` code crashes the interpreter; always derive the
+value from your hook's own argument instead.
+
 ## Getting a one-tap catalog listing
 
 A working downloadable plugin becomes one-tap-installable in the app
