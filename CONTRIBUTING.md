@@ -2,13 +2,12 @@
 
 This repo holds the **bundled** plugins that ship compiled into
 [Omnis](https://github.com/MrIvoe/Omnis) — full platform access, no
-sandbox, reviewed the same as any other Omnis change. If you're
-building a plugin that installs from a pasted GitHub URL instead
-(sandboxed, permission-gated), you don't need this repo at all — see
-[docs/PLUGIN_GUIDE.md](https://github.com/MrIvoe/Omnis/blob/main/docs/PLUGIN_GUIDE.md)
-in the main repo and consider listing it in
-[docs/COMMUNITY_PLUGINS.md](https://github.com/MrIvoe/Omnis/blob/main/docs/COMMUNITY_PLUGINS.md)
-once it works.
+sandbox, reviewed the same as any other Omnis change. Building a
+**downloadable** plugin instead (installs from a pasted GitHub URL,
+sandboxed, permission-gated)? You can build and host that right in
+this repo, in its own folder — see
+[docs/STRUCTURE.md](docs/STRUCTURE.md) for the exact layout and yaml
+format, then list it in `catalog.json` once it works.
 
 The full rules — the Core/plugin split, `MusicPlugin` lifecycle,
 `PluginContext`/`PluginStorage`, code style, testing conventions — live
@@ -23,11 +22,12 @@ this file only covers what's specific to working in *this* repo.
   internals. If your change needs something from Omnis directly, that's
   a sign it needs a new capability added to `omnis_plugin_api` first,
   as its own reviewed change in the Omnis repo.
-- New plugin, or change to an existing one? Add or update its entry in
-  the README's plugin table, including an honest "Verification status"
-  — see the existing rows for the tone: this project would rather say
-  "implemented against a documented API, not exercised against a real
-  device" than imply something is more tested than it is.
+- New bundled plugin, or change to an existing one? Add or update its
+  entry in [docs/PLUGINS.md](docs/PLUGINS.md), including an honest
+  "Verification status" — see the existing rows for the tone: this
+  project would rather say "implemented against a documented API, not
+  exercised against a real device" than imply something is more tested
+  than it is.
 
 ## Development workflow
 
@@ -44,7 +44,7 @@ isn't practical in CI, the same pattern the existing plugin tests use.
 ## Versioning
 
 This repo is pinned to `omnis_plugin_api` by git tag, and Omnis pins
-back to this repo by git tag — see the README's "Versioning" section.
+back to this repo by git tag — see [docs/VERSIONING.md](docs/VERSIONING.md).
 If your PR needs a capability that doesn't exist in
 `omnis_plugin_api` yet, that's a separate, reviewed change in the Omnis
 repo first, then a tag bump here.

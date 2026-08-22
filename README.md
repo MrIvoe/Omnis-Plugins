@@ -4,68 +4,62 @@
 [![Catalog](https://img.shields.io/badge/catalog-mrivoe.github.io%2FOmnis--Plugins-A78BFA)](https://mrivoe.github.io/Omnis-Plugins/)
 [![Omnis app](https://img.shields.io/badge/app-mrivoe.github.io%2FOmnis-3DDCC4)](https://mrivoe.github.io/Omnis/)
 
-Bundled plugin implementations for [Omnis](https://github.com/MrIvoe/Omnis)
-— compiled directly into the app, with full platform access. Depends only
-on `omnis_plugin_api` (a dependency-free contracts package living inside
-the Omnis repo at `packages/omnis_plugin_api`), never on Omnis internals,
-so there's no circular dependency between this repo and the app.
+## What is this?
+
+This is where [Omnis](https://github.com/MrIvoe/Omnis)'s features live.
+Omnis itself is just a small, stable player — everything it can *do*
+(equalizer, lyrics, Spotify, YouTube, and more) is a plugin from this
+repo.
+
+## Who it's for
+
+- **Omnis users** picking which features to install and which to skip.
+- **Plugin authors** adding a new feature to Omnis, or publishing their
+  own plugin for others to install.
+
+## How it works
+
+Two kinds of plugin, depending on how much access a feature needs:
+
+```mermaid
+flowchart LR
+    A[Feature idea] --> B{Needs deep device access?<br/>Bluetooth, hardware EQ, OAuth...}
+    B -- yes --> C[Bundled plugin]
+    B -- no --> D[Downloadable plugin]
+    C --> E[Ships inside every<br/>Omnis install]
+    D --> F[Lives in its own folder here]
+    F --> G[User installs it from<br/>the app's Plugins tab]
+```
+
+- **Bundled** plugins ship inside the app itself — every Omnis install
+  has them.
+- **Downloadable** plugins are optional: a user installs only the ones
+  they want, straight from the app, by picking one from the catalog or
+  pasting a link.
+
+## Why built this way
+
+So a feature going wrong can never take the whole player down, and so
+nobody is stuck with features they don't want. A crash in one plugin
+stays contained to that plugin — playback keeps going either way.
+
+## Where things live
+
+```text
+sample_logger/   an example downloadable plugin — copy it to start your own
+lib/             bundled plugins (ship inside the app)
+docs/            technical documentation — start here to build something
+test/            automated tests
+```
+
+Full technical details — the exact yaml format, the plugin API, every
+bundled plugin's permissions — are in **[docs/README.md](docs/README.md)**.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow specific to
-this repo, and the main repo's
-[CONTRIBUTING.md](https://github.com/MrIvoe/Omnis/blob/main/CONTRIBUTING.md) /
-[PLUGIN_GUIDE.md](https://github.com/MrIvoe/Omnis/blob/main/docs/PLUGIN_GUIDE.md)
-for the full plugin-development rules. Building a downloadable
-(non-bundled) plugin instead? See
-[docs/COMMUNITY_PLUGINS.md](https://github.com/MrIvoe/Omnis/blob/main/docs/COMMUNITY_PLUGINS.md)
-in the main repo to get it listed once it works.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow, and
+[docs/README.md](docs/README.md) for the technical rules.
 
-## Versioning
+## License
 
-Pinned to `omnis_plugin_api` by git tag (`pubspec.yaml`'s `ref:`), not a
-floating branch — a push to Omnis never silently changes what this
-package builds against. Omnis pins back to this repo the same way. To
-pick up new work on purpose: cut a new tag here, then bump the `ref:` in
-Omnis's `pubspec.yaml`, as its own reviewed commit.
-
-See the plugin table below for what's implemented, along with the
-Omnis-side docs: [ARCHITECTURE.md](https://github.com/MrIvoe/Omnis/blob/main/docs/ARCHITECTURE.md),
-[PLUGIN_GUIDE.md](https://github.com/MrIvoe/Omnis/blob/main/docs/PLUGIN_GUIDE.md).
-
-## Plugins
-
-"Verification status" reflects each plugin's own doc comments, not a
-guess — several are honest that they're implemented against a
-documented API but haven't been exercised against real hardware or a
-real account. ⚠️ entries are exactly those; see
-[docs/MANUAL_QA.md](https://github.com/MrIvoe/Omnis/blob/main/docs/MANUAL_QA.md)
-for the two that need a physical device to verify at all.
-
-| Plugin | What it does | Permissions / capabilities | Verification |
-|---|---|---|---|
-| `AudioAnalysisPlugin` | BPM/key/mood via a self-hosted Essentia service | Network | ⚠️ Client unit-tested against mocked responses; the companion service has not been built/run end-to-end |
-| `BluetoothPlaybackPlugin` | Quick-play library/mood/playlist when a Bluetooth device connects | Bluetooth | ⚠️ Implemented against `audio_session`'s documented API; not exercised against a real device |
-| `DrivingModePlugin` | Auto-switches to Car Mode layout above a GPS speed threshold | Location (foreground) | ⚠️ Implemented against `geolocator`'s documented API; not exercised against real movement — see [MANUAL_QA.md](https://github.com/MrIvoe/Omnis/blob/main/docs/MANUAL_QA.md) |
-| `EqualizerPlugin` | Real per-band hardware EQ on Android; 3-band virtual model elsewhere | Hardware EQ (via `PluginContext`) | ⚠️ Hardware path not exercised against a real Android device |
-| `FavoritesPlugin` | Mark tracks as favorites for quick access | None | No caveat noted |
-| `LyricsPlugin` | Manual or auto-fetched (lrclib.net) synced lyrics | Network | No caveat noted |
-| `MetadataEnrichmentPlugin` | Canonical track info + genre/mood tags from MusicBrainz/Last.fm/Discogs | Network | No caveat noted |
-| `QueuePresetPlugin` | Chill/Focus/Workout/Sleep queues from BPM + genre keywords | None | No caveat noted |
-| `RatingsPlugin` | 0-5 star rating per track | None | No caveat noted |
-| `ReplayGainPlugin` | Loudness normalization from ReplayGain tags | None | No caveat noted |
-| `RingtonePlugin` | Set a track as ringtone/notification/alarm (Android only) | Write settings (`set_ringtone`) | ⚠️ Implemented against `set_ringtone`'s documented API; not exercised against a real Android device |
-| `ScrobblePlugin` | Play history for recently-played/most-played lists | None | No caveat noted |
-| `ShuffleRepeatPlugin` | Remembers shuffle/repeat mode across restarts | None | No caveat noted |
-| `SleepTimerPlugin` | Pause playback after a chosen duration | None | No caveat noted |
-| `SmartPlaylistPlugin` | Mood-tag-based autoplay queues | None | No caveat noted |
-| `SpotifyImportPlugin` | Browse/import Spotify playlists (metadata only, OAuth) | Network, OAuth | ⚠️ Not exercised against a real Spotify account |
-| `SpotifyPlaybackPlugin` | Remote-control playback on a Spotify Connect device | Network, OAuth | ⚠️ Not exercised against a real Spotify account/device |
-| `TagEditorPlugin` | Read/write every standard ID3 frame plus custom fields | Storage write | ✅ Verified via `test/id3_codec_safety_test.dart` and round-trip tests |
-| `VisualizerPlugin` | Real spectrum bars via native FFT capture (`audify`) | Microphone (`RECORD_AUDIO` — an OS requirement of the native Visualizer/AVAudioEngine capture APIs, not a choice this plugin makes; requested lazily on first open, never at startup) | ⚠️ Real capture wired up, replacing an earlier hardcoded demo array; not yet exercised against a real device's audio output |
-| `YoutubeMusicImportPlugin` | Search/browse YouTube playlists (metadata only) | Network, OAuth/API key | ⚠️ Not exercised against a real Google Cloud OAuth client |
-| `YoutubePlaybackPlugin` | Plays a video through YouTube's own embedded player (Android/iOS/web only) | WebView | ⚠️ Not run on a real device or web build |
-
-Two more files back the OAuth flows above but aren't standalone
-plugins: `spotify_auth.dart` and `youtube_auth.dart` — both also
-self-flag as unverified against real accounts.
+[MIT](LICENSE).

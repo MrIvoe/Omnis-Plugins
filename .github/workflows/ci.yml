@@ -39,3 +39,15 @@ jobs:
 
       - name: flutter test
         run: flutter test
+
+      - name: Verify docs/STRUCTURE.md tree is up to date
+        run: |
+          cp docs/STRUCTURE.md /tmp/STRUCTURE.md.before
+          dart run tool/generate_structure_tree.dart
+          if ! diff -q /tmp/STRUCTURE.md.before docs/STRUCTURE.md > /dev/null; then
+            echo "docs/STRUCTURE.md's repo-layout tree is stale."
+            echo "Run: dart run tool/generate_structure_tree.dart"
+            echo "then commit the result."
+            diff /tmp/STRUCTURE.md.before docs/STRUCTURE.md || true
+            exit 1
+          fi
