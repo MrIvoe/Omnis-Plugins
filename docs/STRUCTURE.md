@@ -107,8 +107,10 @@ the main repo's `officialPluginCatalog`). That's a PR here — see
 Omnis-Plugins/
 ├── CONTRIBUTING.md           # workflow for contributing to this repo
 ├── README.md                 # start here
+├── analysis_options.yaml
 ├── catalog.json              # one-tap-install catalog for downloadable plugins
 ├── docs/                     # documentation directory — see docs/README.md
+├── favorites/                # downloadable favorites (session-only v1) — see docs/STRUCTURE.md
 ├── lib/                      # ~30 bundled plugin implementations — see docs/PLUGINS.md
 ├── pubspec.yaml              # package manifest for the bundled-plugins package
 ├── sample_logger/            # example downloadable plugin — copy this to start one

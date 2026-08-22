@@ -1,0 +1,14 @@
+id: favorites
+name: Favorites
+description: >-
+  Mark local library tracks as favorites (session-only for now; see
+  docs/STRUCTURE.md). The bundled Favorites plugin is still the
+  recommended default — persistent, and works for non-local tracks too.
+version: 1.0.0
+author: Omnis Team
+entrypoint: plugin.dart
+hooks: []
+permissions:
+  - events
+provides:
+  - favorites

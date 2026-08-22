@@ -42,6 +42,8 @@ const _excluded = {
 const _descriptions = {
   'lib': '~30 bundled plugin implementations — see docs/PLUGINS.md',
   'sample_logger': 'example downloadable plugin — copy this to start one',
+  'favorites':
+      'downloadable favorites (session-only v1) — see docs/STRUCTURE.md',
   'docs': 'documentation directory — see docs/README.md',
   'test': 'automated tests',
   'tool': 'repo maintenance scripts (this generator)',

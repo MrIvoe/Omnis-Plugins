@@ -1,0 +1,11 @@
+analyzer:
+  exclude:
+    # Downloadable-plugin entrypoints (repo/<plugin_id>/plugin.dart) are
+    # never compiled by the normal Dart/Flutter SDK — the app's
+    # dart_eval sandbox compiles them against a synthesized
+    # package:omnis/sandbox_api.dart library that only exists inside
+    # that compiler, so `import`s/functions from it are real at runtime
+    # but unresolvable to this repo's own static analysis. Excluded
+    # here rather than left to show as permanent false-positive errors.
+    # See docs/STRUCTURE.md for the plugin layout this pattern matches.
+    - "*/plugin.dart"
