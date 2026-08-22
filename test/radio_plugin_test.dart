@@ -4,7 +4,24 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:omnis_plugin_api/base_track.dart';
+import 'package:omnis_plugin_api/plugin_context.dart';
+import 'package:omnis_plugin_api/service_interfaces.dart';
+import 'package:omnis_plugin_api/service_registry.dart';
 import 'package:omnis_plugins/radio_plugin.dart';
+
+/// Only `services` is stubbed — the only context member RadioPlugin's
+/// lifecycle touches, same "stub only what's used" shape
+/// favorites_plugin_test.dart's `_FakeContext` already establishes.
+class _FakeContext implements PluginContext {
+  final ServiceRegistry servicesRegistry = ServiceRegistry();
+
+  @override
+  ServiceRegistry get services => servicesRegistry;
+
+  @override
+  noSuchMethod(Invocation invocation) =>
+      throw UnsupportedError('${invocation.memberName} not stubbed');
+}
 
 void main() {
   Map<String, dynamic> station({
@@ -232,5 +249,41 @@ void main() {
     final plugin = RadioPlugin();
     expect(plugin.id, 'radio');
     expect(plugin.usesNetwork, isTrue);
+  });
+
+  group('IRadioProvider', () {
+    RadioPlugin buildPlugin() => RadioPlugin(
+          client: MockClient((req) async => http.Response('[]', 200)),
+        );
+
+    test('initialize registers IRadioProvider; dispose unregisters it',
+        () async {
+      final plugin = buildPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+
+      expect(ctx.servicesRegistry.has<IRadioProvider>(), isFalse);
+      await plugin.initialize();
+      expect(ctx.servicesRegistry.has<IRadioProvider>(), isTrue);
+      expect(ctx.servicesRegistry.get<IRadioProvider>(), same(plugin));
+
+      await plugin.dispose();
+      expect(ctx.servicesRegistry.has<IRadioProvider>(), isFalse);
+    });
+
+    test('disable unregisters; enable re-registers', () async {
+      final plugin = buildPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+
+      await plugin.enable();
+      expect(ctx.servicesRegistry.has<IRadioProvider>(), isTrue);
+
+      await plugin.disable();
+      expect(ctx.servicesRegistry.has<IRadioProvider>(), isFalse);
+
+      await plugin.enable();
+      expect(ctx.servicesRegistry.has<IRadioProvider>(), isTrue);
+    });
   });
 }

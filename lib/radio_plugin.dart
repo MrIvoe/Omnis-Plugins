@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:omnis_plugin_api/base_track.dart';
 import 'package:omnis_plugin_api/plugin_interface.dart';
+import 'package:omnis_plugin_api/service_interfaces.dart';
 
 /// A bundled Internet Radio plugin: search and browse live streaming
 /// stations via the [Radio Browser](https://www.radio-browser.info)
@@ -24,7 +25,7 @@ import 'package:omnis_plugin_api/plugin_interface.dart';
 /// mirrors, which a single music app's search traffic doesn't come
 /// close to needing. If that one mirror is ever retired, this needs a
 /// new hostname, not a redesign.
-class RadioPlugin extends MusicPlugin {
+class RadioPlugin extends MusicPlugin implements IRadioProvider {
   static const _host = 'de1.api.radio-browser.info';
   static const _userAgent = 'Omnis/0.1.0 (github.com/MrIvoe/Omnis)';
 
@@ -36,6 +37,7 @@ class RadioPlugin extends MusicPlugin {
   /// Returns an empty list (never throws) for a blank query, a network
   /// failure, a non-200 response, or an unparseable body — the same
   /// fail-soft contract every network-backed plugin in this repo follows.
+  @override
   Future<List<BaseTrack>> searchStations(String query, {int limit = 30}) {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return Future.value(const []);
@@ -51,6 +53,7 @@ class RadioPlugin extends MusicPlugin {
 
   /// The [limit] most-voted stations overall — a reasonable browsing
   /// default before the user has searched for anything.
+  @override
   Future<List<BaseTrack>> topStations({int limit = 30}) {
     final uri = Uri.https(_host, '/json/stations/topvote/$limit', {
       'hidebroken': 'true',
@@ -169,7 +172,19 @@ class RadioPlugin extends MusicPlugin {
   bool get usesNetwork => true;
 
   @override
-  Future<void> initialize() async {}
+  Future<void> initialize() async {
+    context?.services.register(IRadioProvider, this);
+  }
+
+  @override
+  Future<void> enable() async {
+    context?.services.register(IRadioProvider, this);
+  }
+
+  @override
+  Future<void> disable() async {
+    context?.services.unregister(IRadioProvider, this);
+  }
 
   @override
   Future<void> onTrackStart(BaseTrack track) async {}
@@ -181,5 +196,7 @@ class RadioPlugin extends MusicPlugin {
   dynamic uiSlot(String locationID) => null;
 
   @override
-  Future<void> dispose() async {}
+  Future<void> dispose() async {
+    context?.services.unregister(IRadioProvider, this);
+  }
 }
