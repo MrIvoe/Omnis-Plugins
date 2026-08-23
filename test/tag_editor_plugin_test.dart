@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omnis_plugin_api/base_track.dart';
+import 'package:omnis_plugin_api/service_interfaces.dart';
 import 'package:omnis_plugins/tag_editor_plugin.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -105,5 +106,10 @@ void main() {
       final t = track(title: 'Plain Song', artists: ['Solo Artist']);
       expect(plugin.cleanArtistFields(t), isNull);
     });
+  });
+
+  test('TagEditorPlugin satisfies ITagWriter', () {
+    final plugin = TagEditorPlugin();
+    expect(plugin, isA<ITagWriter>());
   });
 }
