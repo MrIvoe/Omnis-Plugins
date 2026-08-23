@@ -1,8 +1,25 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omnis_plugin_api/base_track.dart';
+import 'package:omnis_plugin_api/plugin_context.dart';
 import 'package:omnis_plugin_api/service_interfaces.dart';
+import 'package:omnis_plugin_api/service_registry.dart';
 import 'package:omnis_plugins/tag_editor_plugin.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+/// Only `services` is stubbed — the only context member
+/// `TagEditorPlugin`'s `initialize`/`enable`/`disable`/`dispose`
+/// lifecycle touches, same "stub only what's used" shape
+/// `ringtone_plugin_test.dart`'s `_FakeContext` already establishes.
+class _FakeContext implements PluginContext {
+  final ServiceRegistry servicesRegistry = ServiceRegistry();
+
+  @override
+  ServiceRegistry get services => servicesRegistry;
+
+  @override
+  noSuchMethod(Invocation invocation) =>
+      throw UnsupportedError('${invocation.memberName} not stubbed');
+}
 
 /// Pure-function and storage-only surfaces of `TagEditorPlugin` — the
 /// artist-splitting logic and auto-tag tracking, neither of which touch
@@ -111,5 +128,86 @@ void main() {
   test('TagEditorPlugin satisfies ITagWriter', () {
     final plugin = TagEditorPlugin();
     expect(plugin, isA<ITagWriter>());
+  });
+
+  test('TagEditorPlugin satisfies IFileTagWriter', () {
+    final plugin = TagEditorPlugin();
+    expect(plugin, isA<IFileTagWriter>());
+  });
+
+  group('IFileTagWriter', () {
+    test('initialize registers IFileTagWriter; dispose unregisters it',
+        () async {
+      final plugin = TagEditorPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+
+      expect(ctx.servicesRegistry.has<IFileTagWriter>(), isFalse);
+      await plugin.initialize();
+      expect(ctx.servicesRegistry.has<IFileTagWriter>(), isTrue);
+      expect(ctx.servicesRegistry.get<IFileTagWriter>(), same(plugin));
+
+      await plugin.dispose();
+      expect(ctx.servicesRegistry.has<IFileTagWriter>(), isFalse);
+    });
+
+    test('disable unregisters; enable re-registers', () async {
+      final plugin = TagEditorPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+
+      await plugin.enable();
+      expect(ctx.servicesRegistry.has<IFileTagWriter>(), isTrue);
+
+      await plugin.disable();
+      expect(ctx.servicesRegistry.has<IFileTagWriter>(), isFalse);
+
+      await plugin.enable();
+      expect(ctx.servicesRegistry.has<IFileTagWriter>(), isTrue);
+    });
+  });
+
+  group('ITagWriter', () {
+    test('initialize registers ITagWriter; dispose unregisters it',
+        () async {
+      final plugin = TagEditorPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+
+      expect(ctx.servicesRegistry.has<ITagWriter>(), isFalse);
+      await plugin.initialize();
+      expect(ctx.servicesRegistry.has<ITagWriter>(), isTrue);
+      expect(ctx.servicesRegistry.get<ITagWriter>(), same(plugin));
+
+      await plugin.dispose();
+      expect(ctx.servicesRegistry.has<ITagWriter>(), isFalse);
+    });
+
+    test('disable unregisters; enable re-registers', () async {
+      final plugin = TagEditorPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+
+      await plugin.enable();
+      expect(ctx.servicesRegistry.has<ITagWriter>(), isTrue);
+
+      await plugin.disable();
+      expect(ctx.servicesRegistry.has<ITagWriter>(), isFalse);
+
+      await plugin.enable();
+      expect(ctx.servicesRegistry.has<ITagWriter>(), isTrue);
+    });
+
+    test('initialize registers both IFileTagWriter and ITagWriter on the '
+        'same instance', () async {
+      final plugin = TagEditorPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+
+      await plugin.initialize();
+
+      expect(ctx.servicesRegistry.get<IFileTagWriter>(), same(plugin));
+      expect(ctx.servicesRegistry.get<ITagWriter>(), same(plugin));
+    });
   });
 }
