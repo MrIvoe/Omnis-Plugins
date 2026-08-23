@@ -750,6 +750,11 @@ void main() {
       await plugin.dispose();
       // Reaching here without a thrown error is the assertion.
     });
+
+    test('MetadataEnrichmentPlugin satisfies IMetadataProvider', () {
+      final plugin = MetadataEnrichmentPlugin(client: neverCalledClient());
+      expect(plugin, isA<IMetadataProvider>());
+    });
   });
 
   group('lookupArtwork (item 12, spec §47)', () {
