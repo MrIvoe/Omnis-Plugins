@@ -408,4 +408,10 @@ void main() {
       expect(RatingsPlugin(), isA<IThumbsProvider>());
     });
   });
+
+  test('RatingsPlugin satisfies IRatingsProvider and IThumbsProvider', () {
+    final plugin = RatingsPlugin();
+    expect(plugin, isA<IRatingsProvider>());
+    expect(plugin, isA<IThumbsProvider>());
+  });
 }
