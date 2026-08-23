@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb, visibleForTesting;
 import 'package:omnis_plugin_api/base_track.dart';
 import 'package:omnis_plugin_api/plugin_interface.dart';
+import 'package:omnis_plugin_api/service_interfaces.dart';
 import 'package:set_ringtone/set_ringtone.dart';
 
 /// Sets a local track as the device's ringtone, notification sound, or
@@ -30,7 +31,7 @@ import 'package:set_ringtone/set_ringtone.dart';
 /// documented API and its own native source (read directly, not assumed
 /// from the README, which is an unedited boilerplate stub); not
 /// exercised against a real Android device in this environment.
-class RingtonePlugin extends MusicPlugin {
+class RingtonePlugin extends MusicPlugin implements IRingtoneProvider {
   String? lastError;
 
   /// Overrides [isSupportedOnThisPlatform]'s real platform check — the
@@ -93,7 +94,19 @@ class RingtonePlugin extends MusicPlugin {
   String get author => 'Omnis Team';
 
   @override
-  Future<void> initialize() async {}
+  Future<void> initialize() async {
+    context?.services.register(IRingtoneProvider, this);
+  }
+
+  @override
+  Future<void> enable() async {
+    context?.services.register(IRingtoneProvider, this);
+  }
+
+  @override
+  Future<void> disable() async {
+    context?.services.unregister(IRingtoneProvider, this);
+  }
 
   @override
   Future<void> onTrackStart(BaseTrack track) async {}
@@ -105,5 +118,7 @@ class RingtonePlugin extends MusicPlugin {
   dynamic uiSlot(String locationID) => null;
 
   @override
-  Future<void> dispose() async {}
+  Future<void> dispose() async {
+    context?.services.unregister(IRingtoneProvider, this);
+  }
 }

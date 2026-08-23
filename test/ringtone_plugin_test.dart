@@ -1,5 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omnis_plugin_api/base_track.dart';
+import 'package:omnis_plugin_api/plugin_context.dart';
+import 'package:omnis_plugin_api/service_interfaces.dart';
+import 'package:omnis_plugin_api/service_registry.dart';
 import 'package:omnis_plugins/ringtone_plugin.dart';
 
 BaseTrack _track({String? localPath = '/music/song.mp3', String title = 'Song'}) =>
@@ -12,6 +15,20 @@ BaseTrack _track({String? localPath = '/music/song.mp3', String title = 'Song'})
       type: TrackType.local,
       localPath: localPath,
     );
+
+/// Only `services` is stubbed — the only context member RingtonePlugin's
+/// lifecycle touches, same "stub only what's used" shape
+/// radio_plugin_test.dart's `_FakeContext` already establishes.
+class _FakeContext implements PluginContext {
+  final ServiceRegistry servicesRegistry = ServiceRegistry();
+
+  @override
+  ServiceRegistry get services => servicesRegistry;
+
+  @override
+  noSuchMethod(Invocation invocation) =>
+      throw UnsupportedError('${invocation.memberName} not stubbed');
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -92,6 +109,43 @@ void main() {
       final plugin = RingtonePlugin(platformSupportOverride: true);
       expect(plugin.description,
           'Set a track as your ringtone, notification, or alarm sound.');
+    });
+  });
+
+  test('RingtonePlugin satisfies IRingtoneProvider', () {
+    final plugin = RingtonePlugin();
+    expect(plugin, isA<IRingtoneProvider>());
+  });
+
+  group('IRingtoneProvider', () {
+    test('initialize registers IRingtoneProvider; dispose unregisters it',
+        () async {
+      final plugin = RingtonePlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+
+      expect(ctx.servicesRegistry.has<IRingtoneProvider>(), isFalse);
+      await plugin.initialize();
+      expect(ctx.servicesRegistry.has<IRingtoneProvider>(), isTrue);
+      expect(ctx.servicesRegistry.get<IRingtoneProvider>(), same(plugin));
+
+      await plugin.dispose();
+      expect(ctx.servicesRegistry.has<IRingtoneProvider>(), isFalse);
+    });
+
+    test('disable unregisters; enable re-registers', () async {
+      final plugin = RingtonePlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+
+      await plugin.enable();
+      expect(ctx.servicesRegistry.has<IRingtoneProvider>(), isTrue);
+
+      await plugin.disable();
+      expect(ctx.servicesRegistry.has<IRingtoneProvider>(), isFalse);
+
+      await plugin.enable();
+      expect(ctx.servicesRegistry.has<IRingtoneProvider>(), isTrue);
     });
   });
 }
