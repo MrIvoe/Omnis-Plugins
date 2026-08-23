@@ -578,4 +578,9 @@ void main() {
       expect(ctx.servicesRegistry.has<ISyncedLyricsProvider>(), isTrue);
     });
   });
+
+  test('LyricsPlugin satisfies ILyricsProvider', () {
+    final plugin = LyricsPlugin();
+    expect(plugin, isA<ILyricsProvider>());
+  });
 }
