@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omnis_plugin_api/base_track.dart';
 import 'package:omnis_plugin_api/service_interfaces.dart' show ThumbState;
-import 'package:omnis_plugins/smart_playlist_rule.dart';
+import 'package:omnis_plugin_api/smart_playlist_rule.dart';
 
 BaseTrack _track({
   required String id,

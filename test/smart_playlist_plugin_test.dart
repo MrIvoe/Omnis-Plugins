@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omnis_plugin_api/base_track.dart';
 import 'package:omnis_plugins/smart_playlist_plugin.dart';
-import 'package:omnis_plugins/smart_playlist_rule.dart';
+import 'package:omnis_plugin_api/smart_playlist_rule.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Storage-only behavior for the rule-persistence layer (§42) — no

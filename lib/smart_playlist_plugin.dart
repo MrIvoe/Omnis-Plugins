@@ -5,7 +5,7 @@ import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:omnis_plugin_api/base_track.dart';
 import 'package:omnis_plugin_api/plugin_interface.dart';
 import 'package:omnis_plugin_api/service_interfaces.dart';
-import 'package:omnis_plugins/smart_playlist_rule.dart';
+import 'package:omnis_plugin_api/smart_playlist_rule.dart';
 
 /// A bundled plugin that suggests smart autoplay queues based on mood or
 /// genre.
@@ -15,7 +15,8 @@ import 'package:omnis_plugins/smart_playlist_rule.dart';
 /// [QueuePresetPlugin] (also an `IQueueBuilder`) matters: this plugin's
 /// curated mood-tag match is meant to win over that plugin's objective
 /// BPM/genre fallback whenever this one actually finds something.
-class SmartPlaylistPlugin extends MusicPlugin implements IQueueBuilder {
+class SmartPlaylistPlugin extends MusicPlugin
+    implements IQueueBuilder, ISmartPlaylistProvider {
   static const _moodsStorageKey = 'moods';
   static const _defaultMoods = ['Chill', 'Focus', 'Workout'];
 
@@ -170,6 +171,7 @@ class SmartPlaylistPlugin extends MusicPlugin implements IQueueBuilder {
   @override
   Future<void> initialize() async {
     context?.services.register(IQueueBuilder, this);
+    context?.services.register(ISmartPlaylistProvider, this);
   }
 
   @override
@@ -185,16 +187,19 @@ class SmartPlaylistPlugin extends MusicPlugin implements IQueueBuilder {
   @override
   Future<void> enable() async {
     context?.services.register(IQueueBuilder, this);
+    context?.services.register(ISmartPlaylistProvider, this);
   }
 
   @override
   Future<void> disable() async {
     context?.services.unregister(IQueueBuilder, this);
+    context?.services.unregister(ISmartPlaylistProvider, this);
   }
 
   @override
   Future<void> dispose() async {
     context?.services.unregister(IQueueBuilder, this);
+    context?.services.unregister(ISmartPlaylistProvider, this);
   }
 }
 
