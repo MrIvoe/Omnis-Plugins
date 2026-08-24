@@ -8,7 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:omnis_plugin_api/base_track.dart';
 import 'package:omnis_plugin_api/plugin_interface.dart';
 import 'package:omnis_plugin_api/service_interfaces.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 /// Real spectrum visualizer, backed by the `audify` package's native
 /// Android `Visualizer`/iOS `AVAudioEngine` capture.
@@ -113,8 +112,8 @@ class VisualizerPlugin extends MusicPlugin implements IVisualizerProvider {
       }
     }
     try {
-      final status = await Permission.microphone.request();
-      if (!status.isGranted) {
+      final granted = await context?.requestMicrophonePermission() ?? false;
+      if (!granted) {
         _lastError =
             'Microphone permission is required for the visualizer.';
         return;
