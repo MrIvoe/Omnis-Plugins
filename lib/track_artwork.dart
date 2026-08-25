@@ -13,35 +13,36 @@ import 'package:omnis_plugins/tag_editor_plugin.dart';
 /// [TagEditorPlugin]).
 ///
 /// A duplicate of the Omnis app's own `lib/ui/widgets/track_artwork.dart`
-/// — not a move, since a dozen other app-side pages/widgets still use
-/// that original directly and can't reach into `omnis_plugins`. This
-/// copy exists purely so `HomeDashboardPlugin`'s extracted
-/// `HomeDashboardPage` (which can no longer import anything under
-/// `package:omnis/`) keeps rendering real album art exactly as it did
-/// before the extraction, instead of degrading to a permanent
-/// placeholder icon.
+/// — not a move. The app *can* already reach `omnis_plugins` (its own
+/// `track_artwork.dart` even imports `package:omnis_plugins/
+/// tag_editor_plugin.dart`), so that's not the reason; the real reason is
+/// this plan's own Global Constraint deferring every cross-repo
+/// `omnis_plugins` pin bump to Tier 2 task 6 — the app is pinned to
+/// `omnis_plugins` tag `v0.50.0`, which predates this file's existence, so
+/// there's no tagged release yet for `HomeDashboardPlugin`'s extracted
+/// `HomeDashboardPage` to import it from. Once task 6 bumps that pin,
+/// this and the app's copy become candidates for consolidation into one
+/// shared copy — not done here, just flagged.
 ///
-/// Every lookup is cached in memory by track id — [TrackArtwork] rebuilds
-/// on every position tick in Now Playing, and without this a file would be
-/// re-read (or the platform channel re-queried) many times a second.
-/// Nothing here is persisted to disk or to `BaseTrack`/`LibraryStore`:
-/// decoded picture bytes are exactly the kind of data that would bloat the
-/// library JSON for no benefit, so they're only ever held for what's
-/// actually been asked for on screen.
+/// Deliberately **not cached** — unlike the app's own copy, which caches
+/// by track id because its `TrackArtwork` rebuilds on every position tick
+/// in Now Playing. Home dashboard cards rebuild far less often, and a
+/// cache here would be a second, independent one the app's own
+/// `ArtworkProvider.invalidate` calls (`tag_editor_dialog.dart`,
+/// `library_page.dart`, after every artwork write) can never reach —
+/// since the two `ArtworkProvider` classes live in different packages,
+/// invalidating one's cache does nothing to the other's, and Home would
+/// show stale cover art for the rest of the process after any edit. Not
+/// caching trades a small amount of redundant I/O (infrequent — Home's
+/// artwork requests aren't triggered by a position-tick rebuild loop the
+/// way Now Playing's are) for never showing stale art, without needing a
+/// cross-repo invalidation path that doesn't exist yet.
 class ArtworkProvider {
   ArtworkProvider._();
 
-  static final Map<String, Future<Uint8List?>> _cache = {};
   static final OnAudioQuery _audioQuery = OnAudioQuery();
 
-  static Future<Uint8List?> forTrack(BaseTrack track) {
-    return _cache.putIfAbsent(track.id, () => _load(track));
-  }
-
-  /// Drop a track's cached artwork — call after writing new artwork via
-  /// the tag editor so the next lookup reflects the change instead of the
-  /// stale cached bytes (or cached "no artwork").
-  static void invalidate(String trackId) => _cache.remove(trackId);
+  static Future<Uint8List?> forTrack(BaseTrack track) => _load(track);
 
   static Future<Uint8List?> _load(BaseTrack track) async {
     final cover = track.coverArt;

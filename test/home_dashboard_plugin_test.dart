@@ -95,4 +95,37 @@ void main() {
       expect(plugin.openCustomizeSheet, returnsNormally);
     });
   });
+
+  group('onLibraryScan (task 3 fix round — debounced Recently Added '
+      'refresh)', () {
+    test('is a harmless no-op when the dashboard page is not currently '
+        'mounted, same as openCustomizeSheet', () async {
+      final plugin = HomeDashboardPlugin();
+      plugin.attach(_FakeContext());
+      plugin.homeDestinations(); // builds the destination, not the page
+
+      // Must not throw even though the debounce timer it starts will
+      // eventually fire against a GlobalKey with no currentState.
+      await plugin.onLibraryScan('/music/a.mp3');
+
+      // dispose() cancels the pending debounce timer — without this the
+      // test process would otherwise carry a live 3-second Timer past
+      // this test's own completion.
+      await plugin.dispose();
+    });
+
+    test('disable() cancels any pending debounce timer, not just '
+        'unregistering IHomeCustomizer', () async {
+      final plugin = HomeDashboardPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+      await plugin.enable();
+
+      await plugin.onLibraryScan('/music/a.mp3');
+      // Must not throw, and must leave no pending timer behind (a leaked
+      // real Timer would otherwise fire ~3s after this test moves on).
+      await plugin.disable();
+      await plugin.dispose();
+    });
+  });
 }

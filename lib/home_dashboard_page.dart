@@ -33,12 +33,16 @@ import 'package:omnis_plugins/track_artwork.dart';
 ///
 ///  - No live "library changed" signal is reachable from a bundled
 ///    plugin (`PluginContext` only offers a one-shot
-///    [PluginContext.loadLibraryTracks], not a change stream) — a scan,
-///    tag edit, or delete made on the Library tab while this page is
-///    already mounted no longer refreshes Recently Added immediately;
-///    it catches up the next time a track-change or favorite-change
-///    event fires this page's own [_load]. Every other trigger
-///    (playback, favoriting, the Customize sheet) is unaffected.
+///    [PluginContext.loadLibraryTracks], not a change stream) — a tag
+///    edit or delete made on the Library tab while this page is already
+///    mounted still doesn't refresh Recently Added immediately; it
+///    catches up the next time a track-change or favorite-change event
+///    fires this page's own [_load]. A **scan** specifically is covered
+///    though: `MusicPlugin.onLibraryScan(String file)` already fires
+///    per-file during one, and `HomeDashboardPlugin` debounces those
+///    into a single call to [refreshAfterLibraryScan] once the scan goes
+///    quiet, so Recently Added catches up right after a scan completes
+///    without needing a genuine change-event stream.
 ///  - Tapping a card starts playback via [PluginContext.setQueue]/`play`
 ///    but no longer pushes Now Playing afterward — `NowPlayingPage`
 ///    lives in the Omnis app and isn't reachable from a bundled plugin.
@@ -185,6 +189,14 @@ class HomeDashboardPageState extends State<HomeDashboardPage> {
     );
     if (changed == true) await _load();
   }
+
+  /// Called by `HomeDashboardPlugin.onLibraryScan` (via its own debounce
+  /// — `onLibraryScan` fires once per file during a scan, not once
+  /// overall) once a scan goes quiet, so Recently Added picks up files
+  /// the scan just added. Public, like [openCustomizeSheet], for the same
+  /// `GlobalKey`-reach reason — the plugin owns the key, this page owns
+  /// the reload logic.
+  Future<void> refreshAfterLibraryScan() => _load();
 
   Future<void> _play(List<BaseTrack> section, int index) async {
     await widget.pluginContext.setQueue(section, startIndex: index);

@@ -15,9 +15,18 @@ import 'package:flutter/material.dart';
 /// `lib/ui/widgets/reorder_menu_button.dart` — not a move, since several
 /// other app-side reorderable lists (`playlist_page.dart`,
 /// `global_sidebar_drawer.dart`, `queue_panel.dart`) still use that
-/// original directly. This copy exists so `HomeDashboardPlugin`'s
-/// extracted Customize-sheet reorder UI (which can no longer import
-/// anything under `package:omnis/`) keeps the same keyboard-reachable
+/// original directly, and a bundled plugin can't import from
+/// `package:omnis/` in the other direction either. The reason there
+/// isn't instead a single shared copy living in `omnis_plugins` (which
+/// the app already depends on — this isn't a "the app can't reach
+/// omnis_plugins" situation) is this plan's own Global Constraint
+/// deferring every cross-repo `omnis_plugins` pin bump to Tier 2 task 6:
+/// the app is pinned to `omnis_plugins` tag `v0.50.0`, which predates
+/// this file's existence, so there's no tagged release yet to import a
+/// shared copy from. Once task 6 bumps that pin, this and the app's copy
+/// become candidates for consolidation into one shared copy — not done
+/// here, just flagged. This copy exists so `HomeDashboardPlugin`'s
+/// extracted Customize-sheet reorder UI keeps the same keyboard-reachable
 /// reorder fallback it had before the extraction.
 ///
 /// [onReorder] must be the exact same callback the enclosing

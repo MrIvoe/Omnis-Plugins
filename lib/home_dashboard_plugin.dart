@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:omnis_plugin_api/base_track.dart';
 import 'package:omnis_plugin_api/plugin_destination.dart';
@@ -13,17 +15,23 @@ import 'package:omnis_plugins/home_dashboard_page.dart';
 /// `HomeLayoutStore` (`lib/core/home_layout_store.dart`) inside the Omnis
 /// app itself.
 ///
-/// Two real capability gaps fell out of the move and are deliberately
-/// not worked around — see `home_dashboard_page.dart`'s own doc comment
-/// for the reasoning:
-///  - no live "library changed" signal reaches a bundled plugin, so a
-///    scan/tag-edit/delete made elsewhere while this tab is already
-///    mounted doesn't refresh Recently Added until some other event
-///    (playback, favoriting, Customize) fires the page's own reload;
-///  - tapping a card starts playback but no longer pushes Now Playing
-///    afterward, since that page lives in the Omnis app and isn't
-///    reachable from here. The always-visible mini-player is still one
-///    tap away.
+/// One real capability gap fell out of the move and is deliberately not
+/// worked around — see `home_dashboard_page.dart`'s own doc comment for
+/// the reasoning: tapping a card starts playback but no longer pushes
+/// Now Playing afterward, since that page lives in the Omnis app and
+/// isn't reachable from here. The always-visible mini-player is still
+/// one tap away.
+///
+/// A second gap — no live "library changed" signal reaching a bundled
+/// plugin, so a tag edit or delete made elsewhere while this tab is
+/// already mounted doesn't refresh Recently Added until some other event
+/// (playback, favoriting, Customize) fires the page's own reload — is
+/// *partially* covered: [onLibraryScan] already fires once per file
+/// during a scan via the existing `MusicPlugin` lifecycle hook (no new
+/// capability interface needed), so this class debounces those into one
+/// [HomeDashboardPageState.refreshAfterLibraryScan] call once the scan
+/// goes quiet. A tag edit/delete made *outside* a scan still isn't
+/// covered, since nothing fires an equivalent per-file hook for those.
 ///
 /// A third, purely cosmetic gap: the Home tab's nav icon used to follow
 /// the app-wide icon style setting (`OmnisIconCatalog.home`, switching
@@ -41,6 +49,14 @@ class HomeDashboardPlugin extends MusicPlugin implements IHomeCustomizer {
   /// for why this replaced the `GlobalKey` `home_page.dart` used to own
   /// directly.
   final _dashboardKey = GlobalKey<HomeDashboardPageState>();
+
+  /// Debounces [onLibraryScan]'s per-file firing into a single
+  /// [HomeDashboardPageState.refreshAfterLibraryScan] call once the scan
+  /// goes quiet — same "batch of per-file events, one settle-triggered
+  /// action" shape and quiet period `LibraryWatcher` (Omnis app,
+  /// `lib/core/library_watcher.dart`) already uses for filesystem-watch
+  /// bursts.
+  Timer? _scanDebounce;
 
   @override
   String get id => 'home_dashboard';
@@ -75,11 +91,13 @@ class HomeDashboardPlugin extends MusicPlugin implements IHomeCustomizer {
 
   @override
   Future<void> disable() async {
+    _scanDebounce?.cancel();
     context?.services.unregister(IHomeCustomizer, this);
   }
 
   @override
   Future<void> dispose() async {
+    _scanDebounce?.cancel();
     context?.services.unregister(IHomeCustomizer, this);
   }
 
@@ -87,7 +105,12 @@ class HomeDashboardPlugin extends MusicPlugin implements IHomeCustomizer {
   Future<void> onTrackStart(BaseTrack track) async {}
 
   @override
-  Future<void> onLibraryScan(String file) async {}
+  Future<void> onLibraryScan(String file) async {
+    _scanDebounce?.cancel();
+    _scanDebounce = Timer(const Duration(seconds: 3), () {
+      _dashboardKey.currentState?.refreshAfterLibraryScan();
+    });
+  }
 
   @override
   dynamic uiSlot(String locationID) => null;

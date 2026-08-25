@@ -10,6 +10,7 @@ import 'package:omnis_plugin_api/service_registry.dart';
 import 'package:omnis_plugin_api/track_play_stats.dart';
 import 'package:omnis_plugins/favorites_plugin.dart';
 import 'package:omnis_plugins/home_dashboard_page.dart';
+import 'package:omnis_plugins/home_dashboard_plugin.dart';
 import 'package:omnis_plugins/home_layout_store.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
@@ -292,6 +293,59 @@ void main() {
       // -> _load()), not a fresh initState.
       await _settle(tester);
       expect(find.text('Favorites'), findsOneWidget);
+    });
+  });
+
+  testWidgets(
+      'HomeDashboardPlugin.onLibraryScan debounces a real scan\'s '
+      'per-file calls into a single reload that reaches the '
+      'currently-mounted page, refreshing Recently Added (task 3 fix '
+      'round — was previously a dead no-op)', (tester) async {
+    await tester.runAsync(() async {
+      final ctx = _FakePluginContext()
+        ..library = [_track('old', dateAdded: DateTime(2024, 1, 1))];
+      final plugin = HomeDashboardPlugin();
+      plugin.attach(ctx);
+      await plugin.initialize();
+      addTearDown(plugin.dispose);
+
+      // Mounts the real page through the plugin's own pageBuilder — not
+      // a bare `HomeDashboardPage(key: ..., ...)` like every other test
+      // in this file — so it carries the plugin's own private
+      // `_dashboardKey`, the exact same instance `onLibraryScan`'s
+      // debounce callback below reaches through.
+      final destination = plugin.homeDestinations().single;
+      await tester.pumpWidget(MaterialApp(home: Builder(
+        builder: destination.pageBuilder,
+      )));
+      await _settle(tester);
+
+      expect(find.text('Track old'), findsOneWidget);
+      expect(find.text('Track new'), findsNothing);
+
+      // A scan adds a new file to the library and reports it — twice in
+      // quick succession, the same per-file firing a real multi-file
+      // scan would produce. Nothing must have reloaded yet: still well
+      // inside the 3-second quiet period `HomeDashboardPlugin` debounces
+      // by.
+      ctx.library = [
+        ...ctx.library,
+        _track('new', dateAdded: DateTime(2025, 1, 1)),
+      ];
+      await plugin.onLibraryScan('/music/new.mp3');
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      await plugin.onLibraryScan('/music/new.mp3');
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(find.text('Track new'), findsNothing);
+
+      // Once the scan goes quiet for the full debounce window (measured
+      // from the *last* onLibraryScan call above, not the first — proof
+      // the rapid re-calls actually collapsed into one timer reset
+      // rather than each independently scheduling its own reload), the
+      // page reloads and Recently Added picks up the new file.
+      await Future<void>.delayed(const Duration(seconds: 3));
+      await _settle(tester);
+      expect(find.text('Track new'), findsOneWidget);
     });
   });
 
