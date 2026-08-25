@@ -10,6 +10,7 @@ import 'package:omnis_plugins/driving_mode_plugin.dart';
 import 'package:omnis_plugins/emby_plugin.dart';
 import 'package:omnis_plugins/equalizer_plugin.dart';
 import 'package:omnis_plugins/favorites_plugin.dart';
+import 'package:omnis_plugins/home_dashboard_plugin.dart';
 import 'package:omnis_plugins/jellyfin_plugin.dart';
 import 'package:omnis_plugins/koel_plugin.dart';
 import 'package:omnis_plugins/lyrics_plugin.dart';
@@ -87,6 +88,7 @@ List<MusicPlugin> createBundledPlugins() {
     () => LyricsPlugin(),
     () => FavoritesPlugin(),
     () => RatingsPlugin(),
+    () => HomeDashboardPlugin(),
     () => VisualizerPlugin(),
     () => SmartPlaylistPlugin(),
     () => QueuePresetPlugin(),
