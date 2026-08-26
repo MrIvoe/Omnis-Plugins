@@ -4,6 +4,7 @@ import 'package:omnis_plugin_api/custom_mood.dart';
 import 'package:omnis_plugin_api/plugin_destination.dart';
 import 'package:omnis_plugin_api/plugin_interface.dart';
 import 'package:omnis_plugin_api/service_interfaces.dart';
+import 'package:omnis_plugins/custom_mood_store.dart';
 import 'package:omnis_plugins/moods_page.dart';
 
 /// Contributes the Moods tab (preset mood tiles from every registered
@@ -123,7 +124,17 @@ class MoodsPlugin extends MusicPlugin implements IMoodPlayer {
     _moodsKey.currentState?.playCustomMood(custom);
   }
 
+  /// Reads straight from [CustomMoodStore] rather than through
+  /// [_moodsKey]'s mounted `State` — matches `RadioPlugin
+  /// .customStationSummaries`'s exact pattern (see
+  /// [ICustomRadioStationProvider.customStationSummaries]'s own doc for
+  /// why), fixed for the identical problem shape: a synchronous read off
+  /// the mounted page's `State` could race that page's own async initial
+  /// load, silently returning an empty list at app startup and reading
+  /// every pinned custom mood as a stale/deleted reference. Going to the
+  /// store directly sidesteps that race — this store is in the same
+  /// package as this plugin, so there's no cross-package boundary being
+  /// crossed the way there would be for the app to read it directly.
   @override
-  List<CustomMood> get customMoods =>
-      _moodsKey.currentState?.customMoods ?? const [];
+  Future<List<CustomMood>> customMoods() => CustomMoodStore.instance.load();
 }

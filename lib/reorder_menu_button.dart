@@ -17,15 +17,19 @@ import 'package:flutter/material.dart';
 /// `global_sidebar_drawer.dart`, `queue_panel.dart`) still use that
 /// original directly, and a bundled plugin can't import from
 /// `package:omnis/` in the other direction either. The reason there
-/// isn't instead a single shared copy living in `omnis_plugins` (which
+/// wasn't instead a single shared copy living in `omnis_plugins` (which
 /// the app already depends on — this isn't a "the app can't reach
-/// omnis_plugins" situation) is this plan's own Global Constraint
+/// omnis_plugins" situation) was this plan's own Global Constraint
 /// deferring every cross-repo `omnis_plugins` pin bump to Tier 2 task 6:
-/// the app is pinned to `omnis_plugins` tag `v0.50.0`, which predates
-/// this file's existence, so there's no tagged release yet to import a
-/// shared copy from. Once task 6 bumps that pin, this and the app's copy
-/// become candidates for consolidation into one shared copy — not done
-/// here, just flagged. This copy exists so `HomeDashboardPlugin`'s
+/// the app was pinned to `omnis_plugins` tag `v0.50.0`, which predated
+/// this file's existence, so there was no tagged release yet to import a
+/// shared copy from. Task 6 has since bumped that pin (Omnis now pins
+/// `omnis_plugins` at `v0.51.0`), so the app *could* now depend on that
+/// newer tag to reach a shared copy — but task 6 only bumped the pin, it
+/// didn't consolidate any duplicated files, so this and the app's copy
+/// still both exist unchanged. They remain a candidate for consolidation
+/// into one shared copy, just not a blocked one any more — not done
+/// here, still just flagged. This copy exists so `HomeDashboardPlugin`'s
 /// extracted Customize-sheet reorder UI keeps the same keyboard-reachable
 /// reorder fallback it had before the extraction.
 ///

@@ -56,12 +56,14 @@ class MoodsPageState extends State<MoodsPage> {
     if (mounted) setState(() => _customMoods = moods);
   }
 
-  /// The user's saved custom moods, as currently loaded. Public (like
-  /// [playMood]/[playCustomMood]) so `MoodsPlugin` can serve
-  /// `IMoodPlayer.customMoods` from the one already-loaded list rather
-  /// than re-reading `CustomMoodStore` behind this page's back — the
-  /// pop-out sidebar's "MY MOODS" section needs the names to render, and
-  /// the full object to hand back to [playCustomMood].
+  /// The user's saved custom moods, as currently loaded by this page —
+  /// backs this page's own grid (the tiles built alongside the preset
+  /// moods in [build]). `MoodsPlugin.customMoods` no longer reads this
+  /// getter: it reads `CustomMoodStore` directly instead, to avoid racing
+  /// this page's own async [_loadCustomMoods] at app startup (see that
+  /// getter's own doc comment for the full reasoning). Kept public mainly
+  /// so [playCustomMood]/[_deleteCustomMood]/etc. and this page's own
+  /// tests have one obvious place to read the currently-loaded list.
   List<CustomMood> get customMoods => List.unmodifiable(_customMoods);
 
   IRatingsProvider? get _ratings =>

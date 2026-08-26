@@ -15,14 +15,22 @@ import 'package:omnis_plugins/tag_editor_plugin.dart';
 /// A duplicate of the Omnis app's own `lib/ui/widgets/track_artwork.dart`
 /// — not a move. The app *can* already reach `omnis_plugins` (its own
 /// `track_artwork.dart` even imports `package:omnis_plugins/
-/// tag_editor_plugin.dart`), so that's not the reason; the real reason is
-/// this plan's own Global Constraint deferring every cross-repo
-/// `omnis_plugins` pin bump to Tier 2 task 6 — the app is pinned to
-/// `omnis_plugins` tag `v0.50.0`, which predates this file's existence, so
-/// there's no tagged release yet for `HomeDashboardPlugin`'s extracted
-/// `HomeDashboardPage` to import it from. Once task 6 bumps that pin,
-/// this and the app's copy become candidates for consolidation into one
-/// shared copy — not done here, just flagged.
+/// tag_editor_plugin.dart`), so that's not the reason; the original
+/// reason was this plan's own Global Constraint deferring every
+/// cross-repo `omnis_plugins` pin bump to Tier 2 task 6 — the app was
+/// pinned to `omnis_plugins` tag `v0.50.0`, which predated this file's
+/// existence, so there was no tagged release yet for
+/// `HomeDashboardPlugin`'s extracted `HomeDashboardPage` to import it
+/// from. Task 6 has since bumped that pin (Omnis now pins
+/// `omnis_plugins` at `v0.51.0`, well past this file's release), so the
+/// app *could* now depend on that newer tag to reach this copy — task 6
+/// only bumped the pin, though, it didn't consolidate any duplicated
+/// files, so both copies still exist unchanged. That bump doesn't make
+/// this pair a consolidation candidate any more, though — see the note
+/// on the deliberate cache-behavior difference below: the two copies are
+/// now intentionally different implementations, not just duplicated, so
+/// they should not be naively merged even with the pin no longer
+/// blocking it.
 ///
 /// Deliberately **not cached** here — unlike the app's own copy, whose
 /// process-global cache the app's own `ArtworkProvider.invalidate` calls

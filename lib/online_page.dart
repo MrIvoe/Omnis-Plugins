@@ -50,14 +50,16 @@ import 'package:omnis_plugins/custom_radio_station_store.dart';
 /// by [PluginContext.currentTrack], and every `services.get`/`getAll` call
 /// simply moves from `PluginManager.services` to [PluginContext.services].
 ///
-/// One small cosmetic gap fell out of the move: the old page fired
+/// A small cosmetic gap fell out of the move: the old page fired
 /// `OmnisHaptics.selectionClick()` (gated on the user's haptics setting)
-/// when switching the section chip. `OmnisHaptics`/`AppSettings` are both
-/// Omnis-app-only and unreachable from a bundled plugin — the same class
-/// of gap `HomeDashboardPlugin`/`MoodsPlugin` already document for their
-/// own app-only reaches — so switching chips here is silent. Nothing else
-/// in this repo's other moved pages used haptics, so there's no
-/// established plugin-side replacement to reuse.
+/// at three call sites — switching the section chip here, and each of
+/// [RadioBody]'s and [_ProviderSearchView]'s own `_toggleFavorite`.
+/// `OmnisHaptics`/`AppSettings` are both Omnis-app-only and unreachable
+/// from a bundled plugin — the same class of gap `HomeDashboardPlugin`/
+/// `MoodsPlugin` already document for their own app-only reaches — so
+/// all three of those actions are silent here. Nothing else in this
+/// repo's other moved pages used haptics, so there's no established
+/// plugin-side replacement to reuse.
 class OnlinePage extends StatefulWidget {
   final PluginContext pluginContext;
 
@@ -90,8 +92,21 @@ class _OnlinePageState extends State<OnlinePage> {
       .where((p) => p.isConfigured)
       .toList();
 
+  // Sorted alphabetically by [IEmbeddedPlaybackProvider.providerName]
+  // rather than left in registration-completion order — neither
+  // `YoutubePlaybackPlugin` nor `SpotifyPlaybackPlugin` opts into
+  // `requiresSequentialInit`, so both initialize in
+  // `PluginManager.initializeAll()`'s concurrent first round, and which
+  // one finishes registering first (and therefore which one
+  // `getAll<IEmbeddedPlaybackProvider>()` would otherwise return first)
+  // is a race, not something `bundled_plugins.dart`'s list order
+  // determines — see that file's own doc comment. Sorting here keeps the
+  // chip row's order deterministic without touching plugin init
+  // sequencing.
   List<IEmbeddedPlaybackProvider> get _embeddedProviders =>
-      widget.pluginContext.services.getAll<IEmbeddedPlaybackProvider>();
+      widget.pluginContext.services.getAll<IEmbeddedPlaybackProvider>()
+          .toList()
+        ..sort((a, b) => a.providerName.compareTo(b.providerName));
 
   List<_OnlineSection> get _sections {
     return [

@@ -15,11 +15,17 @@ import 'package:flutter/material.dart';
 /// `theme_editor_page.dart` for each of `ThemeManifest`'s nine color-scheme
 /// roles, which also uses its static `colorToHex`/`colorFromHex`
 /// helpers), so the app's copy can't go away. Second, even a
-/// plugins-side-only consumer couldn't import the app's copy: this plan's
-/// own Global Constraint defers every cross-repo `omnis_plugins` pin bump
-/// to Tier 2 task 6, and the dependency only points one way regardless —
-/// same reasoning `track_artwork.dart`/`schema_versioning.dart`'s own doc
-/// comments already spell out for their duplicates. `MoodBuilderPage`
+/// plugins-side-only consumer couldn't have imported the app's copy at
+/// the time this was written: this plan's own Global Constraint deferred
+/// every cross-repo `omnis_plugins` pin bump to Tier 2 task 6, and the
+/// dependency only points one way regardless. Task 6 has since bumped
+/// that pin (Omnis now pins `omnis_plugins` at `v0.51.0`), so that
+/// specific blocker is gone — but task 6 only bumped the pin, it didn't
+/// consolidate any duplicated files, so both copies still exist
+/// unchanged and remain a candidate for consolidation, not done here,
+/// just flagged — same reasoning `track_artwork.dart`/
+/// `schema_versioning.dart`'s own doc comments already spell out for
+/// their duplicates. `MoodBuilderPage`
 /// (moved here with the rest of the Moods cluster) needs a color picker
 /// for a custom mood's tile color; this is that picker, kept
 /// byte-for-byte equivalent to the app's copy so the two stay trivially

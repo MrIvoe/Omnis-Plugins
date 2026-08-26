@@ -51,8 +51,16 @@ class OnlinePlugin extends MusicPlugin {
   @override
   String get author => 'Omnis Team';
 
+  /// `true` — this plugin's own [description] names three network-reaching
+  /// features it hosts directly (embedded YouTube/Spotify playback, and
+  /// self-hosted media-server search), and `online_page.dart` makes a
+  /// direct `Image.network(favicon)` call to fetch radio station
+  /// favicons. `false` here would silently exempt this plugin from the
+  /// Plugins page's "disable every plugin with network access" bulk
+  /// privacy control, which is exactly backwards for a tab whose entire
+  /// purpose is reaching online sources.
   @override
-  bool get usesNetwork => false;
+  bool get usesNetwork => true;
 
   @override
   Future<void> initialize() async {}

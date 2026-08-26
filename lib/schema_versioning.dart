@@ -8,10 +8,10 @@
 /// (`LibraryStore`, `PlaylistStore`, `RecoveryJournal`) that stay in the
 /// app and can't be touched by this task. This isn't a "the app can't
 /// reach a shared copy" situation — the app already depends on
-/// `omnis_plugins` — the underlying reason a shared copy doesn't already
-/// live there is this plan's own Global Constraint deferring every
-/// cross-repo `omnis_plugins` pin bump to Tier 2 task 6: the app is
-/// pinned to `omnis_plugins` tag `v0.50.0`, which predates this file's
+/// `omnis_plugins` — the underlying reason a shared copy didn't already
+/// live there was this plan's own Global Constraint deferring every
+/// cross-repo `omnis_plugins` pin bump to Tier 2 task 6: the app was
+/// pinned to `omnis_plugins` tag `v0.50.0`, which predated this file's
 /// existence. `HomeLayoutStore` (moved here from
 /// `lib/core/home_layout_store.dart` as part of extracting the Home
 /// dashboard into a plugin) needs the exact same versioned-envelope +
@@ -19,11 +19,16 @@
 /// already builds on, to keep reading the same on-disk file shape its
 /// pre-extraction self wrote. Kept byte-for-byte identical to the
 /// original so both copies stay trivially comparable if either ever
-/// needs a real migration added. Once task 6 bumps the app's pin, this
-/// and the app's copy become candidates for consolidation into one
-/// shared copy — not done here, just flagged (though the three other
-/// core-only stores above would still need their own reason to move
-/// before that consolidation could go all the way to a single copy).
+/// needs a real migration added. Task 6 has since bumped the app's pin
+/// (Omnis now pins `omnis_plugins` at `v0.51.0`), so the app *could* now
+/// depend on that newer tag to reach a shared copy — but task 6 only
+/// bumped the pin, it didn't consolidate any duplicated files, so this
+/// and the app's copy still both exist unchanged. They remain a
+/// candidate for consolidation into one shared copy, just not a blocked
+/// one any more — not done here, still just flagged (though the three
+/// other core-only stores above would still need their own reason to
+/// move before that consolidation could go all the way to a single
+/// copy).
 typedef SchemaMigration = dynamic Function(dynamic data);
 
 /// Wraps [payload] in the standard versioned-envelope shape:

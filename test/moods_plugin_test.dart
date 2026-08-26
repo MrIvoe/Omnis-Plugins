@@ -181,12 +181,18 @@ void main() {
       );
     });
 
-    test('customMoods is an empty list, not null and not a throw', () {
+    test('customMoods is an empty list, not null and not a throw, when '
+        'nothing has been saved', () async {
       final plugin = MoodsPlugin();
       plugin.attach(_FakeContext());
       plugin.homeDestinations();
 
-      expect(plugin.customMoods, isEmpty);
+      // customMoods() reads CustomMoodStore directly rather than through
+      // the mounted page's State (see MoodsPlugin.customMoods's own doc
+      // comment for why), so this no longer exercises the "page not
+      // mounted" no-op path specifically — CustomMoodStore.load() itself
+      // fails soft to an empty list when nothing has ever been saved.
+      expect(await plugin.customMoods(), isEmpty);
     });
   });
 
@@ -218,15 +224,21 @@ void main() {
       await _settle(tester);
     }
 
-    testWidgets('customMoods serves the mounted page\'s loaded list',
-        (tester) async {
+    testWidgets('customMoods reads whatever has been saved to '
+        'CustomMoodStore, mounted or not', (tester) async {
       await tester.runAsync(() async {
         await CustomMoodStore.instance.save(
             const [CustomMood(id: 'm1', name: 'Late Night Drive')]);
 
+        // customMoods() reads CustomMoodStore directly now (see
+        // MoodsPlugin.customMoods's own doc comment), so it no longer
+        // needs the page mounted first the way it used to — pumping the
+        // destination here just confirms mounting the page doesn't
+        // change the result.
         await pumpDestination(tester);
 
-        expect(plugin.customMoods.map((m) => m.name), ['Late Night Drive']);
+        expect((await plugin.customMoods()).map((m) => m.name),
+            ['Late Night Drive']);
       });
     });
 

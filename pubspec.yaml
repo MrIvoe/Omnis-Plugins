@@ -60,5 +60,12 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
+  # Used by test/online_page_test.dart to fake PluginStorage's secure tier
+  # via flutter_secure_storage's own bundled
+  # TestFlutterSecureStoragePlatform — same "declared directly since it's
+  # imported directly" reasoning Omnis's own pubspec.yaml uses for this
+  # identical pair. Already a transitive dependency via omnis_plugin_api.
+  flutter_secure_storage: ^9.2.2
+  flutter_secure_storage_platform_interface: ^1.1.2
 
 flutter:

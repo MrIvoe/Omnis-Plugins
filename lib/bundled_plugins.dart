@@ -53,12 +53,27 @@ import 'package:omnis_plugins/youtube_playback_plugin.dart';
 ///     `MusicPlugin`;
 ///  2. add it to the list below.
 ///
-/// Order matters for hook dispatch order (the order of this list), and
-/// also for any `ServiceRegistry` interface more than one plugin
-/// registers under — today, `IQueueBuilder`: `SmartPlaylistPlugin` must
-/// come before `QueuePresetPlugin` so its curated mood-tag match gets
-/// tried before that plugin's always-non-empty objective fallback (see
-/// `IQueueBuilder`'s doc in `service_interfaces.dart`).
+/// Order matters for hook dispatch order (the order of this list). It
+/// also matters for a multi-registrant `ServiceRegistry` interface, but
+/// *only* when every registrant involved opts into
+/// `requiresSequentialInit` the way the three plugins below do — for
+/// those, this list's order is exactly the round-2 initialization order,
+/// so it's also the registration-completion order `ServiceRegistry
+/// .getAll<T>()` callers see. `IQueueBuilder` is the current example:
+/// `SmartPlaylistPlugin` must come before `QueuePresetPlugin` so its
+/// curated mood-tag match gets tried before that plugin's
+/// always-non-empty objective fallback (see `IQueueBuilder`'s doc in
+/// `service_interfaces.dart`), and both are sequential-init plugins, so
+/// that ordering is actually guaranteed. `IEmbeddedPlaybackProvider`
+/// (`YoutubePlaybackPlugin`/`SpotifyPlaybackPlugin`) and
+/// `IOnlineSearchProvider` are also multi-registrant interfaces, but none
+/// of their registrants opt into `requiresSequentialInit` — their
+/// `initialize()` calls all run in `PluginManager.initializeAll()`'s
+/// concurrent first round via `Future.wait`, so registration-completion
+/// order for those two interfaces is a race, not this list's order.
+/// Anything that displays results from either of those two in a
+/// consistent order (e.g. the Online tab's embedded-playback chip row)
+/// has to sort its own output rather than rely on list position here.
 ///
 /// Three plugins have a *documented initialization-order dependency*
 /// rather than just a dispatch-order preference: `QueuePresetPlugin`
