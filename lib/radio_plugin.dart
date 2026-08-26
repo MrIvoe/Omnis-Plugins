@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:omnis_plugin_api/base_track.dart';
 import 'package:omnis_plugin_api/plugin_interface.dart';
 import 'package:omnis_plugin_api/service_interfaces.dart';
+import 'package:omnis_plugins/custom_radio_station_store.dart';
 
 /// A bundled Internet Radio plugin: search and browse live streaming
 /// stations via the [Radio Browser](https://www.radio-browser.info)
@@ -25,7 +26,22 @@ import 'package:omnis_plugin_api/service_interfaces.dart';
 /// mirrors, which a single music app's search traffic doesn't come
 /// close to needing. If that one mirror is ever retired, this needs a
 /// new hostname, not a redesign.
-class RadioPlugin extends MusicPlugin implements IRadioProvider {
+///
+/// Also implements [ICustomRadioStationProvider] (added for a Tier 2
+/// task 5 fix round) — the read side of `CustomRadioStationStore`'s
+/// user-added stations, needed by two Omnis-app call sites
+/// (`MainCore._checkPlaybackSchedules`, `PlaybackSchedulePage`) for
+/// scheduled playback. `RadioPlugin`, not `OnlinePlugin`, owns this
+/// registration: custom stations are only ever addable/manageable
+/// through `RadioBody`, which itself only renders once [IRadioProvider]
+/// (this same plugin) is registered — see `RadioBody.build`'s own "The
+/// Internet Radio plugin is disabled in Settings" fallback — so gating
+/// scheduled custom-station playback behind this plugin's own
+/// enabled/disabled state matches the existing "no Radio plugin, no way
+/// to touch custom stations at all" UI behavior exactly, rather than
+/// tying it to `OnlinePlugin`'s unrelated tab-shell lifecycle.
+class RadioPlugin extends MusicPlugin
+    implements IRadioProvider, ICustomRadioStationProvider {
   static const _host = 'de1.api.radio-browser.info';
   static const _userAgent = 'Omnis/0.1.0 (github.com/MrIvoe/Omnis)';
 
@@ -151,6 +167,23 @@ class RadioPlugin extends MusicPlugin implements IRadioProvider {
     );
   }
 
+  /// See [ICustomRadioStationProvider.customStationSummaries].
+  @override
+  Future<List<(String id, String name)>> customStationSummaries() async {
+    final stations = await CustomRadioStationStore.instance.load();
+    return [for (final s in stations) (s.id, s.name)];
+  }
+
+  /// See [ICustomRadioStationProvider.trackForCustomStation].
+  @override
+  Future<BaseTrack?> trackForCustomStation(String stationId) async {
+    final stations = await CustomRadioStationStore.instance.load();
+    for (final s in stations) {
+      if (s.id == stationId) return s.toTrack();
+    }
+    return null;
+  }
+
   @override
   String get id => 'radio';
 
@@ -174,16 +207,19 @@ class RadioPlugin extends MusicPlugin implements IRadioProvider {
   @override
   Future<void> initialize() async {
     context?.services.register(IRadioProvider, this);
+    context?.services.register(ICustomRadioStationProvider, this);
   }
 
   @override
   Future<void> enable() async {
     context?.services.register(IRadioProvider, this);
+    context?.services.register(ICustomRadioStationProvider, this);
   }
 
   @override
   Future<void> disable() async {
     context?.services.unregister(IRadioProvider, this);
+    context?.services.unregister(ICustomRadioStationProvider, this);
   }
 
   @override
@@ -198,5 +234,6 @@ class RadioPlugin extends MusicPlugin implements IRadioProvider {
   @override
   Future<void> dispose() async {
     context?.services.unregister(IRadioProvider, this);
+    context?.services.unregister(ICustomRadioStationProvider, this);
   }
 }

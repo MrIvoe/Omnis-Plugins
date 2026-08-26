@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -7,7 +8,19 @@ import 'package:omnis_plugin_api/base_track.dart';
 import 'package:omnis_plugin_api/plugin_context.dart';
 import 'package:omnis_plugin_api/service_interfaces.dart';
 import 'package:omnis_plugin_api/service_registry.dart';
+import 'package:omnis_plugins/custom_radio_station_store.dart';
 import 'package:omnis_plugins/radio_plugin.dart';
+import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
+import 'package:plugin_platform_interface/plugin_platform_interface.dart';
+
+class _FakePathProvider extends PathProviderPlatform
+    with MockPlatformInterfaceMixin {
+  final String tempDir;
+  _FakePathProvider(this.tempDir);
+
+  @override
+  Future<String?> getApplicationDocumentsPath() async => tempDir;
+}
 
 /// Only `services` is stubbed — the only context member RadioPlugin's
 /// lifecycle touches, same "stub only what's used" shape
@@ -24,6 +37,16 @@ class _FakeContext implements PluginContext {
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() async {
+    final tempDir =
+        (await Directory.systemTemp.createTemp('omnis_radio_plugin_test'))
+            .path;
+    PathProviderPlatform.instance = _FakePathProvider(tempDir);
+    await CustomRadioStationStore.instance.save([]);
+  });
+
   Map<String, dynamic> station({
     String uuid = 'abc-123',
     String name = 'Test FM',
@@ -284,6 +307,85 @@ void main() {
 
       await plugin.enable();
       expect(ctx.servicesRegistry.has<IRadioProvider>(), isTrue);
+    });
+  });
+
+  group('ICustomRadioStationProvider (Tier 2 task 5 fix round)', () {
+    RadioPlugin buildPlugin() => RadioPlugin(
+          client: MockClient((req) async => http.Response('[]', 200)),
+        );
+
+    test('initialize registers ICustomRadioStationProvider alongside '
+        'IRadioProvider; dispose unregisters both', () async {
+      final plugin = buildPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+
+      expect(ctx.servicesRegistry.has<ICustomRadioStationProvider>(), isFalse);
+      await plugin.initialize();
+      expect(ctx.servicesRegistry.has<ICustomRadioStationProvider>(), isTrue);
+      expect(
+          ctx.servicesRegistry.get<ICustomRadioStationProvider>(), same(plugin));
+
+      await plugin.dispose();
+      expect(ctx.servicesRegistry.has<ICustomRadioStationProvider>(), isFalse);
+    });
+
+    test('disable unregisters; enable re-registers', () async {
+      final plugin = buildPlugin();
+      final ctx = _FakeContext();
+      plugin.attach(ctx);
+
+      await plugin.enable();
+      expect(ctx.servicesRegistry.has<ICustomRadioStationProvider>(), isTrue);
+
+      await plugin.disable();
+      expect(ctx.servicesRegistry.has<ICustomRadioStationProvider>(), isFalse);
+
+      await plugin.enable();
+      expect(ctx.servicesRegistry.has<ICustomRadioStationProvider>(), isTrue);
+    });
+
+    test('customStationSummaries reflects CustomRadioStationStore, as '
+        '(id, name) records — a positional record, read via .\$1/.\$2',
+        () async {
+      await CustomRadioStationStore.instance
+          .add('Chill FM', 'https://stream.example.com/chill.mp3');
+      final plugin = buildPlugin();
+
+      final summaries = await plugin.customStationSummaries();
+
+      expect(summaries, hasLength(1));
+      expect(summaries.single.$2, 'Chill FM');
+      expect(summaries.single.$1, startsWith('radio:custom:'));
+    });
+
+    test('customStationSummaries is empty when nothing has been saved',
+        () async {
+      final plugin = buildPlugin();
+
+      expect(await plugin.customStationSummaries(), isEmpty);
+    });
+
+    test('trackForCustomStation resolves a real playable BaseTrack for a '
+        'known id', () async {
+      final saved = await CustomRadioStationStore.instance
+          .add('Chill FM', 'https://stream.example.com/chill.mp3');
+      final plugin = buildPlugin();
+
+      final track = await plugin.trackForCustomStation(saved.single.id);
+
+      expect(track, isNotNull);
+      expect(track!.title, 'Chill FM');
+      expect(track.type, TrackType.radio);
+      expect(track.streamUrl, 'https://stream.example.com/chill.mp3');
+    });
+
+    test('trackForCustomStation returns null for an unknown id instead of '
+        'throwing', () async {
+      final plugin = buildPlugin();
+
+      expect(await plugin.trackForCustomStation('does-not-exist'), isNull);
     });
   });
 }

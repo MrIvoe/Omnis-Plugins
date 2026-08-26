@@ -604,6 +604,56 @@ void main() {
     });
 
     testWidgets(
+        'Task 10 Step 1: the "now playing" marker on a search result tile '
+        'uses the app theme\'s primary color, not a hardcoded purple',
+        (tester) async {
+      final ctx = _FakeContext();
+      await _register(ctx, await _configuredAmpache(_ampacheClient()));
+      // AmpachePlugin.search prefixes the server's raw song id ('s1', per
+      // _ampacheClient's fixture above) with 'ampache:' when building each
+      // result's BaseTrack — pre-seeding the fake context's currentTrack
+      // with that same id means the very first build after search results
+      // land already renders this tile as "playing," no tap-driven
+      // rebuild required (_ProviderSearchView's own _play doesn't call
+      // setState itself). This is _ProviderSearchView._buildResultTile's
+      // own regression coverage, a separate code path from RadioBody's
+      // tiles (covered above) and distinct from the plain widget-tree
+      // check the "a configured search-provider plugin..." test above
+      // already does.
+      ctx._current = BaseTrack(
+        id: 'ampache:s1',
+        title: 'Found Song',
+        artists: const ['Found Artist'],
+        album: 'Album',
+        duration: 200,
+        type: TrackType.ampache,
+      );
+      const themePrimary = Color(0xFF00A876);
+
+      await tester.pumpWidget(MaterialApp(
+        theme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(seedColor: themePrimary)
+              .copyWith(primary: themePrimary),
+        ),
+        home: OnlinePage(pluginContext: ctx),
+      ));
+      await tester.pump();
+
+      await tester.tap(find.widgetWithText(ChoiceChip, 'Ampache'));
+      await tester.pump();
+
+      await tester.enterText(find.byType(TextField), 'found');
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('Found Song'), findsOneWidget);
+      final icon = tester.widget<Icon>(find.byIcon(Icons.graphic_eq));
+      expect(icon.color, themePrimary);
+      expect(icon.color, isNot(Colors.deepPurple));
+    });
+
+    testWidgets(
         'an unconfigured search-provider plugin does not get a chip at all',
         (tester) async {
       final ctx = _FakeContext();
