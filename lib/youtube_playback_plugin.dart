@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:omnis_plugin_api/base_track.dart';
 import 'package:omnis_plugin_api/plugin_interface.dart';
+import 'package:omnis_plugin_api/service_interfaces.dart';
 import 'package:youtube_player_iframe/youtube_player_iframe.dart';
 
 /// Plays a YouTube video's real audio+video through YouTube's own
@@ -37,7 +38,16 @@ import 'package:youtube_player_iframe/youtube_player_iframe.dart';
 /// **Verification status**: not run on a real Android/iOS device or web
 /// build in this environment — implemented against the package's
 /// documented API, not device-verified.
-class YoutubePlaybackPlugin extends MusicPlugin {
+///
+/// Implements [IEmbeddedPlaybackProvider] (added for Tier 2 task 5) so
+/// the Omnis app's "Online" tab can embed this plugin's own settings
+/// widget as one of its sections without reaching this — an
+/// Omnis-Plugins-side, bundled-only — class by concrete type or via the
+/// Omnis-app-only `PluginManager.byId`/`uiSlotForPlugin`. See that
+/// interface's own doc comment in `service_interfaces.dart` for the full
+/// reasoning.
+class YoutubePlaybackPlugin extends MusicPlugin
+    implements IEmbeddedPlaybackProvider {
   YoutubePlayerController? _controller;
 
   static bool get isSupportedOnThisPlatform =>
@@ -94,8 +104,30 @@ class YoutubePlaybackPlugin extends MusicPlugin {
   @override
   bool get usesNetwork => true;
 
+  /// Short user-facing tab label for the Online tab's chip row — kept as
+  /// the terse "YouTube" rather than [name] ("YouTube Playback"), the
+  /// same shorter-than-`name` label the pre-extraction `OnlinePage`
+  /// always hardcoded for this section.
   @override
-  Future<void> initialize() async {}
+  String get providerName => 'YouTube';
+
+  @override
+  dynamic buildSettingsSlot() => uiSlot('plugin_settings');
+
+  @override
+  Future<void> initialize() async {
+    context?.services.register(IEmbeddedPlaybackProvider, this);
+  }
+
+  @override
+  Future<void> enable() async {
+    context?.services.register(IEmbeddedPlaybackProvider, this);
+  }
+
+  @override
+  Future<void> disable() async {
+    context?.services.unregister(IEmbeddedPlaybackProvider, this);
+  }
 
   @override
   Future<void> onTrackStart(BaseTrack track) async {}
@@ -109,6 +141,7 @@ class YoutubePlaybackPlugin extends MusicPlugin {
 
   @override
   Future<void> dispose() async {
+    context?.services.unregister(IEmbeddedPlaybackProvider, this);
     _controller?.close();
   }
 }

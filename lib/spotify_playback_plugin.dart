@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:omnis_plugin_api/base_track.dart';
 import 'package:omnis_plugin_api/plugin_interface.dart';
+import 'package:omnis_plugin_api/service_interfaces.dart';
 import 'package:omnis_plugins/spotify_auth.dart';
 
 /// A device Spotify Connect can hand playback control to (a phone, a
@@ -59,7 +60,14 @@ class SpotifyPlaybackState {
 ///
 /// **Verification status**: unverified against a real account/device —
 /// see `SpotifyAuth`'s doc comment.
-class SpotifyPlaybackPlugin extends MusicPlugin {
+///
+/// Implements [IEmbeddedPlaybackProvider] (added for Tier 2 task 5) so
+/// the Omnis app's "Online" tab can embed this plugin's own settings
+/// widget as one of its sections — see that interface's own doc comment
+/// in `service_interfaces.dart`, and `YoutubePlaybackPlugin`'s identical
+/// use of it, for the full reasoning.
+class SpotifyPlaybackPlugin extends MusicPlugin
+    implements IEmbeddedPlaybackProvider {
   final http.Client _client;
   late final SpotifyAuth _auth = SpotifyAuth(storage: storage, client: _client);
 
@@ -216,8 +224,31 @@ class SpotifyPlaybackPlugin extends MusicPlugin {
   @override
   bool get usesNetwork => true;
 
+  /// Short user-facing tab label for the Online tab's chip row — kept as
+  /// the terse "Spotify" rather than [name] ("Spotify Playback"), the
+  /// same shorter-than-`name` label the pre-extraction `OnlinePage`
+  /// always hardcoded for this section.
   @override
-  Future<void> initialize() => _auth.warmUp();
+  String get providerName => 'Spotify';
+
+  @override
+  dynamic buildSettingsSlot() => uiSlot('plugin_settings');
+
+  @override
+  Future<void> initialize() async {
+    await _auth.warmUp();
+    context?.services.register(IEmbeddedPlaybackProvider, this);
+  }
+
+  @override
+  Future<void> enable() async {
+    context?.services.register(IEmbeddedPlaybackProvider, this);
+  }
+
+  @override
+  Future<void> disable() async {
+    context?.services.unregister(IEmbeddedPlaybackProvider, this);
+  }
 
   @override
   Future<void> onTrackStart(BaseTrack track) async {}
@@ -231,6 +262,7 @@ class SpotifyPlaybackPlugin extends MusicPlugin {
 
   @override
   Future<void> dispose() async {
+    context?.services.unregister(IEmbeddedPlaybackProvider, this);
     _client.close();
   }
 }
